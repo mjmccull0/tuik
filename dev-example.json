@@ -1,0 +1,33 @@
+[
+  {
+    "label": "󰊢 Git Operations",
+    "items": [
+      { "label": "󰄬 Status", "exec": "git status" },
+      { "label": " Pull", "exec": "git pull origin $(git branch --show-current)" },
+      { "label": "󰶣 Commit All", "exec": "git add . && git commit -m 'mink: auto-commit'" }
+    ]
+  },
+  {
+    "label": "🚀 Development",
+    "items": [
+      { "label": " Run Server", "exec": "npm run dev --port ${PORT:-3000}" },
+      { "label": "📦 Build", "exec": "go build -o ./tmp/mink ." },
+      { "label": "🧪 Test Suite", "exec": "go test -v ./..." }
+    ]
+  },
+  {
+    "label": "🛠️ System",
+    "items": [
+      { "label": "󰃭 Current Directory", "exec": "ls -la $PWD" },
+      { "label": " Check Resources", "exec": "htop" },
+      {
+        "label": "🧹 Cleanup",
+        "items": [
+          { "label": "Empty Tmp", "exec": "rm -rf ./tmp/*" },
+          { "label": "Clean Logs", "exec": "rm *.log" }
+        ]
+      }
+    ]
+  },
+  { "label": "󰩈 Exit Mink", "exec": "echo 'Goodbye!'" }
+]

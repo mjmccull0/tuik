@@ -1,0 +1,6 @@
+[
+  { "label": "󰊢 Git Status", "exec": "git status" },
+  { "label": "📦 Build Project", "exec": "go build -o ./tmp/main ." },
+  { "label": "🚀 Run Tests", "exec": "go test ./..." },
+  { "label": "🧹 Clean", "exec": "rm -rf ./tmp" }
+]
