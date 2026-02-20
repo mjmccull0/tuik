@@ -26,46 +26,64 @@ type model struct {
 	chosen   string
 }
 
+func handleEnter(m model) (tea.Model, tea.Cmd) {
+	current := m.choices[m.cursor]
+
+	if len(current.Items) > 0 {
+		// Enter sub-menu
+		m.stack = append(m.stack, menuState{
+			choices: m.choices,
+			cursor: m.cursor,
+		})
+
+		m.choices = current.Items
+		m.cursor = 0
+
+		return m, nil
+	}
+
+	// It's an executable command
+	m.chosen = os.ExpandEnv(current.Exec)
+	return m, tea.Quit
+}
+
+func handleBack(m model) (tea.Model, tea.Cmd) {
+	if len(m.stack) == 0 {
+		return m, tea.Quit
+	}
+
+	if len(m.stack) > 0 {
+		// RESTORE the previous state
+		lastIndex := len(m.stack) - 1
+		previousState := m.stack[lastIndex]
+
+		m.choices = previousState.choices
+		// Focus returns to the parent item!
+		m.cursor = previousState.cursor
+		
+		m.stack = m.stack[:lastIndex]
+	}
+
+	return m, nil
+}
+
 func (m model) Init() tea.Cmd { return nil }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "ctrl+c", "q":
-			return m, tea.Quit
-		case "esc", "backspace":
-			if len(m.stack) > 0 {
-				// RESTORE the previous state
-				lastIndex := len(m.stack) - 1
-				previousState := m.stack[lastIndex]
-				
-				m.choices = previousState.choices
-				m.cursor = previousState.cursor // Focus returns to the parent item!
-				
-				m.stack = m.stack[:lastIndex]
-				return m, nil
+		case tea.KeyMsg:
+			switch msg.String() {
+				case "ctrl+c", "q":
+					return m, tea.Quit
+				case "up", "k":
+					if m.cursor > 0 { m.cursor-- }
+				case "down", "j":
+					if m.cursor < len(m.choices)-1 { m.cursor++ }
+				case "esc", "backspace":
+					return handleBack(m)
+				case "enter":
+					return handleEnter(m)
 			}
-		case "enter":
-			current := m.choices[m.cursor]
-			if len(current.Items) > 0 {
-				// Enter sub-menu
-				m.stack = append(m.stack, menuState{
-				  choices: m.choices,
-					cursor: m.cursor,
-			  })
-				m.choices = current.Items
-				m.cursor = 0
-				return m, nil
-			}
-			// It's an executable command
-			m.chosen = os.ExpandEnv(current.Exec)
-			return m, tea.Quit
-		case "up", "k":
-			if m.cursor > 0 { m.cursor-- }
-		case "down", "j":
-			if m.cursor < len(m.choices)-1 { m.cursor++ }
-		}
 	}
 	return m, nil
 }
