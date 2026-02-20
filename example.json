@@ -1,0 +1,79 @@
+[
+  {
+    "label": "󰊢 Git Operations",
+    "items": [
+      { "label": "󰄬 Status", "exec": "git status" },
+      { "label": " Pull", "exec": "git pull origin $(git branch --show-current)" },
+      { "label": "󰶣 Commit All", "exec": "git add . && git commit -m 'mink: auto-commit'" }
+    ]
+  },
+  {
+    "label": "🚀 Development",
+    "items": [
+      { "label": " Run Server", "exec": "npm run dev --port ${PORT:-3000}" },
+      { "label": "📦 Build", "exec": "go build -o ./tmp/mink ." },
+      { "label": "🧪 Test Suite", "exec": "go test -v ./..." }
+    ]
+  },
+  {
+    "label": "🛠️ System",
+    "items": [
+      { "label": "󰃭 Current Directory", "exec": "ls -la $PWD" },
+      { "label": " Check Resources", "exec": "htop" },
+      {
+        "label": "🧹 Cleanup",
+        "items": [
+          { "label": "Empty Tmp", "exec": "rm -rf ./tmp/*" },
+          { "label": "Clean Logs", "exec": "rm *.log" }
+        ]
+      }
+    ]
+  },
+  {
+    "label": "󰊢 Select a File to Edit",
+    "source": "ls -p | grep -v /"
+  },
+  {
+    "label": " Recent Commits",
+    "source": "git log --oneline -n 5"
+  },
+  {
+    "label": "Git Staging",
+    "id": "staging_step",
+    "source": "git status --porcelain",
+    "multi_select": true,
+    "select_if": "^[MAR]",
+    "items_label_filter": "^.. ",
+    "items_label_style": {
+      "^MM": { "color": "214", "bold": true },
+      "^[MAR] ": { "color": "42" },
+      "^.[MAR]": { "color": "196" },
+      "^\\?\\?": { "color": "240", "italic": true }
+    },
+    "exec": "git add {{.files}}"
+  },
+  {
+    "label": "Development",
+    "then": [
+      { "label": "Build Project", "exec": "go build -v ." },
+      { "label": "Run Tests", "exec": "go test ./..." }
+    ]
+  },
+  {
+    "label": "Recent Commits",
+    "source": "git log --oneline -n 10",
+    "items_label_style": {
+      "^[0-9a-f]+": { "color": "214" }
+    }
+  },
+  {
+    "label": "󰊢 Git Workflow",
+    "id": "branch_name",
+    "source": "git branch --format='%(refname:short)'",
+    "items": [
+        { "label": "Check Status", "exec": "git status" },
+        { "label": "Log Branch", "exec": "git log --oneline" }
+    ]
+  },
+  { "label": "󰩈 Exit Mink", "exec": "echo 'Goodbye!'" }
+]
