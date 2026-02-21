@@ -3,6 +3,7 @@ package ui
 import (
 	"encoding/json"
 
+	"fmt"
 	"github.com/charmbracelet/lipgloss"
 	"tuik/ui/components"
 )
@@ -64,7 +65,59 @@ func (c *Component) GetActionAt(cursor int) string {
 	return c.OnPress
 }
 
-func (c *Component) Render(ctx StyleContext, cursor int) string {
+func (c *Component) GetIDAt(cursor int) string {
+	if c.GetType() == "list" {
+		// Lists usually don't have IDs for focus, but items might.
+		// For now, we return empty so navigation works.
+		return ""
+	}
+
+	if c.GetType() == "text-input" {
+		return c.ID
+	}
+
+	for _, child := range c.Children {
+		if id := child.GetIDAt(cursor); id != "" {
+			return id
+		}
+	}
+	return ""
+}
+
+func (c *Component) GetFocusableIDs() []string {
+	var ids []string
+	if c.GetType() == "text-input" {
+		ids = append(ids, c.ID)
+	}
+	if c.GetType() == "list" {
+		// Treat each list item as a focusable "stop"
+		for i := range c.Items {
+			ids = append(ids, fmt.Sprintf("item-%d", i))
+		}
+	}
+	for i := range c.Children {
+		ids = append(ids, c.Children[i].GetFocusableIDs()...)
+	}
+	return ids
+}
+
+// ui/engine.go
+
+// IsFocusable determines if a component should be part of the Tab ring.
+func (c *Component) IsFocusable() bool {
+	// 1. Text inputs are focusable because they have an ID for the store.
+	if c.GetType() == "text-input" && c.ID != "" {
+		return true
+	}
+	// 2. Lists are focusable because they contain items to navigate.
+	if c.GetType() == "list" && len(c.Items) > 0 {
+		return true
+	}
+	// 3. Static text and empty containers are ignored.
+	return false
+}
+
+func (c *Component) Render(ctx StyleContext, cursor int, isFocused bool, store map[string]string) string {
 	// 1. Inheritance
 	if c.Style.Color != "" {
 		ctx.Foreground = c.Style.Color
@@ -81,13 +134,17 @@ func (c *Component) Render(ctx StyleContext, cursor int) string {
 		// Handle the recursion here to keep components package clean
 		var rendered []string
 		for i := range c.Children {
-			rendered = append(rendered, c.Children[i].Render(ctx, cursor))
+			rendered = append(rendered, c.Children[i].Render(ctx, cursor, false, store))
 		}
 		content = components.RenderContainer(rendered)
 
 	case "text":
 		// Matches the signature: RenderText(t components.TextValue)
 		content = components.RenderText(c.Text)
+
+	case "text-input":
+		val := store[c.ID] // Get the current value from the store
+		return components.RenderInput(val, isFocused)
 
 	case "list":
 		// Matches the signature: RenderList(items, multi, ctx, cursor)
@@ -105,6 +162,7 @@ func (c *Component) Render(ctx StyleContext, cursor int) string {
 		Background(lipgloss.Color(ctx.Background)).
 		Render(content)
 }
+
 
 // UnmarshalJSON remains here as part of the Engine
 func (c *Component) UnmarshalJSON(data []byte) error {
