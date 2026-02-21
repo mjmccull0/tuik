@@ -1,0 +1,29 @@
+{
+  "main": {
+    "style": { "background-color": "#04B575", "padding": 2 },
+    "children": [
+      {
+        "type": "text",
+        "text": "TUIK ENGINE", 
+        "style": { "bold": true, "margin-bottom": 1 }
+      },
+      {
+        "type": "text",
+        "text": { "value": "Shorthand Enabled", "style": { "color": "#000000" } }
+      },
+      {
+        "type": "list",
+        "multi-select": true,
+        "items": [
+          { "label": "main.go" },
+          { "label": "tuik.json" }
+        ]
+      },
+      {
+        "type": "text",
+        "text": "Press q to exit",
+        "style": { "margin-top": 1 }
+      }
+    ]
+  }
+}

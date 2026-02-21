@@ -4,14 +4,36 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	// "regexp"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
-// --- Styles & Context ---
+// --- The Shorthand Magic ---
+
+type TextValue struct {
+	Value string      `json:"value"`
+	Style StyleConfig `json:"style"`
+}
+
+// UnmarshalJSON detects if 'text' is "string" or {"value": "string"}
+func (t *TextValue) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		t.Value = s
+		return nil
+	}
+	type alias TextValue
+	var obj alias
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return err
+	}
+	*t = TextValue(obj)
+	return nil
+}
+
+// --- Structures ---
 
 type StyleConfig struct {
 	Color           string `json:"color"`
@@ -24,28 +46,115 @@ type StyleConfig struct {
 	MarginBottom    int    `json:"margin-bottom"`
 }
 
+type Component struct {
+	Type        string      `json:"type"`
+	Text        TextValue   `json:"text"`
+	Style       StyleConfig `json:"style"`
+	Children    []Component `json:"children,omitempty"`
+	Items       []ListItem  `json:"items,omitempty"`
+	MultiSelect bool        `json:"multi-select"`
+}
+
+func (c *Component) UnmarshalJSON(data []byte) error {
+	// Create a shadow type to avoid infinite recursion during Unmarshal
+	type shadow Component
+	var s shadow
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+
+	// Copy the unmarshaled data to our component
+	*c = Component(s)
+
+	// If Type is missing, infer it from the keys present
+	if c.Type == "" {
+		// Use a map to check for specific key existence
+		var raw map[string]json.RawMessage
+		json.Unmarshal(data, &raw)
+
+		if _, ok := raw["text"]; ok {
+			c.Type = "text"
+		} else if _, ok := raw["items"]; ok || raw["source"] != nil {
+			c.Type = "list"
+		} else if _, ok := raw["children"]; ok {
+			c.Type = "container"
+		}
+	}
+	return nil
+}
+
+type ListItem struct {
+	Label    string `json:"label"`
+	Selected bool
+}
+
 type StyleContext struct {
 	Foreground string
 	Background string
 }
 
-// --- Components ---
+// --- Recursive Renderer ---
 
-type ListItem struct {
-	Label    string `json:"label"`
-	Exec     string `json:"exec"`
-	Selected bool
-	Color    string
-}
+func (c *Component) Render(ctx StyleContext, cursor int) string {
+	// 1. Inherit/Override Colors
+	if c.Style.Color != "" { ctx.Foreground = c.Style.Color }
+	if c.Style.BackgroundColor != "" { ctx.Background = c.Style.BackgroundColor }
 
-type Component struct {
-	Type     string      `json:"type"`
-	Value    string      `json:"value,omitempty"`
-	Style    StyleConfig `json:"style"`
-	Children []Component `json:"children,omitempty"`
-	// List specific
-	Items       []ListItem `json:"items,omitempty"`
-	MultiSelect bool       `json:"multi-select"`
+	var content string
+	
+	// Use 'container' as default if children exist
+	kind := c.Type
+	if kind == "" && len(c.Children) > 0 { kind = "container" }
+
+	switch kind {
+	case "container", "view":
+		var parts []string
+		for i := range c.Children {
+			parts = append(parts, c.Children[i].Render(ctx, cursor))
+		}
+		content = strings.Join(parts, "\n")
+
+	case "text":
+		// Render the text with its local style + inherited context
+		tStyle := lipgloss.NewStyle().
+			Bold(c.Text.Style.Bold || c.Style.Bold).
+			Underline(c.Text.Style.Underline || c.Style.Underline)
+		
+		if c.Text.Style.Color != "" {
+			tStyle = tStyle.Foreground(lipgloss.Color(c.Text.Style.Color))
+		}
+		content = tStyle.Render(c.Text.Value)
+
+	case "list":
+		var lines []string
+		for i, item := range c.Items {
+			ptr := "  "
+			if cursor == i { ptr = "> " }
+			
+			box := ""
+			if c.MultiSelect {
+				mark := " "
+				if item.Selected { mark = "x" }
+				box = fmt.Sprintf("[%s] ", mark)
+			}
+			
+			label := item.Label
+			if item.Selected {
+				label = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Render(label)
+			}
+			lines = append(lines, fmt.Sprintf("%s%s%s", ptr, box, label))
+		}
+		content = strings.Join(lines, "\n")
+	}
+
+	// Apply Box Decoration (Containment)
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ctx.Foreground)).
+		Background(lipgloss.Color(ctx.Background)).
+		Padding(c.Style.Padding).
+		MarginTop(c.Style.MarginTop).
+		MarginBottom(c.Style.MarginBottom).
+		Render(content)
 }
 
 // --- Bubble Tea Model ---
@@ -79,65 +188,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// Recursive Renderer
-func (c *Component) Render(ctx StyleContext, globalCursor int) string {
-	// 1. Inherit Styles (Colors cascade)
-	if c.Style.Color != "" { ctx.Foreground = c.Style.Color }
-	if c.Style.BackgroundColor != "" { ctx.Background = c.Style.BackgroundColor }
-
-	var content string
-
-	// 2. Render by Type
-	switch c.Type {
-	case "container", "view":
-		var parts []string
-		for i := range c.Children {
-			parts = append(parts, c.Children[i].Render(ctx, globalCursor))
-		}
-		content = strings.Join(parts, "\n")
-
-	case "text":
-		content = c.Value
-
-	case "list":
-		var lines []string
-		for i, item := range c.Items {
-			// Gutter Logic (Stability)
-			cursor := "  "
-			if globalCursor == i { cursor = "> " }
-			
-			prefix := ""
-			if c.MultiSelect {
-				check := " "
-				if item.Selected { check = "x" }
-				prefix = fmt.Sprintf("[%s] ", check)
-			}
-
-			// Apply item specific colors
-			itemStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ctx.Foreground))
-			if item.Selected {
-				itemStyle = itemStyle.Foreground(lipgloss.Color("42")) // Green
-			}
-			
-			lines = append(lines, fmt.Sprintf("%s%s%s", cursor, prefix, itemStyle.Render(item.Label)))
-		}
-		content = strings.Join(lines, "\n")
-	}
-
-	// 3. Apply Layout (Containment/Padding/Margin)
-	res := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ctx.Foreground)).
-		Background(lipgloss.Color(ctx.Background)).
-		Bold(c.Style.Bold).
-		Italic(c.Style.Italic).
-		Underline(c.Style.Underline).
-		Padding(c.Style.Padding).
-		MarginTop(c.Style.MarginTop).
-		MarginBottom(c.Style.MarginBottom).
-		Render(content)
-
-	return res
-}
 
 func (m model) View() string {
 	return m.root.Render(StyleContext{}, m.cursor)

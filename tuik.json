@@ -1,30 +1,24 @@
 {
   "main": {
-    "type": "container",
-    "style": {
-      "background-color": "#04B575",
-      "padding": 2
-    },
+    "style": { "background-color": "#04B575", "padding": 2 },
     "children": [
-      {
-        "type": "text",
-        "value": "TUIK COMPONENT ENGINE",
-        "style": { "bold": true, "underline": true, "margin-bottom": 1 }
+      { 
+        "text": "TUIK ENGINE", 
+        "style": { "bold": true, "margin-bottom": 1 } 
+      },
+      { 
+        "text": "Shorthand Enabled", 
+        "style": { "color": "#000000" } 
+      },
+      { 
+        "text": "Just a string now" 
       },
       {
-        "type": "list",
-        "multi-select": true,
-        "style": { "color": "#FFFFFF" },
         "items": [
-          { "label": "Initial Commit", "exec": "git commit" },
-          { "label": "Refactor Core", "exec": "git commit" },
-          { "label": "Update Styles", "exec": "git commit" }
-        ]
-      },
-      {
-        "type": "text",
-        "value": "─── footer ───",
-        "style": { "color": "#e2e2e2", "margin-top": 1 }
+          { "label": "main.go" },
+          { "label": "tuik.json" }
+        ],
+        "multi-select": true
       }
     ]
   }
