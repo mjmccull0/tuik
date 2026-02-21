@@ -2,26 +2,27 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
+	"os/exec"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	// Replace 'your-project-name' with the name from your go.mod file
-	"tuik/ui" 
+	"tuik/ui"
 )
 
 type model struct {
-	root   ui.Component
-	cursor int
+	registry map[string]*ui.Component
+	active   string // The ID of the current view
+	cursor   int
 }
 
-func (m model) Init() tea.Cmd {
-	return nil
-}
+func (m model) Init() tea.Cmd { return nil }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// Get item count from the UI tree to bound the cursor
-	itemCount := m.root.GetItemCount()
+	currentView := m.registry[m.active]
+	if currentView == nil { return m, nil }
+
+	itemCount := currentView.GetItemCount()
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -30,62 +31,48 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case "up", "k":
-			if m.cursor > 0 {
-				m.cursor--
-			}
-
+			if m.cursor > 0 { m.cursor-- }
 		case "down", "j":
-			if m.cursor < itemCount-1 {
-				m.cursor++
-			}
+			if m.cursor < itemCount-1 { m.cursor++ }
 
-		case " ":
-			// Use the helper we wrote in ui/renderers.go
-			m.root.ToggleItem(m.cursor)
+		case "enter", " ":
+				action := currentView.GetActionAt(m.cursor)
+				if action == "" {
+						return m, nil
+				}
 
-		case "enter":
-			// Future: Logic for 'exec' commands will go here
-			return m, tea.Quit
+				// 1. Check if the string matches a View ID in our Registry
+				if _, isView := m.registry[action]; isView {
+						m.active = action
+						m.cursor = 0
+						return m, nil
+				}
+
+				// 2. Otherwise, treat it as a Shell Command
+				c := strings.Fields(action)
+				if len(c) > 0 {
+						return m, tea.ExecProcess(exec.Command(c[0], c[1:]...), func(err error) tea.Msg {
+								// We can return a custom message here to handle errors
+								return nil 
+						})
+				}
 		}
 	}
 	return m, nil
 }
 
 func (m model) View() string {
-	// Start the recursive render with an empty context
-	// Colors will inherit from the 'main' component down
-	initialCtx := ui.StyleContext{}
-	return m.root.Render(initialCtx, m.cursor)
+	return m.registry[m.active].Render(ui.StyleContext{}, m.cursor)
 }
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Println("Usage: tuik <config.json>")
-		os.Exit(1)
-	}
+	content, _ := os.ReadFile("tuik.json")
+	var config ui.Config
+	json.Unmarshal(content, &config)
 
-	content, err := os.ReadFile(os.Args[1])
-	if err != nil {
-		fmt.Printf("Could not read file: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Unmarshal into a map to find the "main" entry point
-	var config map[string]ui.Component
-	if err := json.Unmarshal(content, &config); err != nil {
-		fmt.Printf("JSON Error: %v\n", err)
-		os.Exit(1)
-	}
-
-	mainComp, ok := config["main"]
-	if !ok {
-		fmt.Println("Error: JSON must contain a 'main' object.")
-		os.Exit(1)
-	}
-
-	p := tea.NewProgram(model{root: mainComp})
-	if _, err := p.Run(); err != nil {
-		fmt.Printf("Alas, it failed: %v", err)
-		os.Exit(1)
-	}
+	p := tea.NewProgram(model{
+		registry: config.Views,
+		active:   config.Main,
+	})
+	p.Run()
 }

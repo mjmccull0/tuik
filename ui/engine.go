@@ -7,13 +7,23 @@ import (
 	"tuik/ui/components"
 )
 
+// ViewRegistry holds all available views by ID
+type ViewRegistry map[string]Component
+
+type Config struct {
+	Main  string                `json:"main"`
+	Views map[string]*Component `json:"views"`
+}
+
 type Component struct {
 	Type        string               `json:"type"`
+	ID          string               `json:"id,omitempty"`
 	Text        components.TextValue `json:"text"`
 	Style       StyleConfig          `json:"style"`
 	Children    []Component          `json:"children,omitempty"`
 	Items       []components.ListItem `json:"items,omitempty"`
 	MultiSelect bool                 `json:"multi-select"`
+	OnPress     string               `json:"on-press"`
 }
 
 // 1. Fixed the missing GetType method
@@ -31,6 +41,27 @@ func (c *Component) GetType() string {
 		return "list"
 	}
 	return "container"
+}
+
+func (c *Component) GetActionAt(cursor int) string {
+	// If this IS the list, return the action at the cursor
+	if c.GetType() == "list" {
+		if cursor >= 0 && cursor < len(c.Items) {
+			return c.Items[cursor].OnPress
+		}
+		return ""
+	}
+
+	// If it's a container, we have to find which child holds the cursor
+	// For now, let's simplify: check children recursively
+	for _, child := range c.Children {
+		if action := child.GetActionAt(cursor); action != "" {
+			return action
+		}
+	}
+	
+	// Fallback to the component's own action (for buttons)
+	return c.OnPress
 }
 
 func (c *Component) Render(ctx StyleContext, cursor int) string {
