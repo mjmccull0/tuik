@@ -1,14 +1,14 @@
 {
   "main": {
-    "style": { "background-color": "#04B575", "padding": 2 },
+    "style": { "background-color": "#1A73E8", "color": "#FFFFFF", "padding": 2 },
     "children": [
       { 
         "text": "TUIK ENGINE", 
         "style": { "bold": true, "margin-bottom": 1 } 
       },
       { 
-        "text": "Shorthand Enabled", 
-        "style": { "color": "#000000" } 
+        "text": "Shorthand Enabled",
+        "style": { "color": "#000000" }
       },
       { 
         "text": "Just a string now" 
