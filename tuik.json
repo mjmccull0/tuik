@@ -1,6 +1,31 @@
-[
-  { "label": "󰊢 Git Status", "exec": "git status" },
-  { "label": "📦 Build Project", "exec": "go build -o ./tmp/main ." },
-  { "label": "🚀 Run Tests", "exec": "go test ./..." },
-  { "label": "🧹 Clean", "exec": "rm -rf ./tmp" }
-]
+{
+  "main": {
+    "type": "container",
+    "style": {
+      "background-color": "#04B575",
+      "padding": 2
+    },
+    "children": [
+      {
+        "type": "text",
+        "value": "TUIK COMPONENT ENGINE",
+        "style": { "bold": true, "underline": true, "margin-bottom": 1 }
+      },
+      {
+        "type": "list",
+        "multi-select": true,
+        "style": { "color": "#FFFFFF" },
+        "items": [
+          { "label": "Initial Commit", "exec": "git commit" },
+          { "label": "Refactor Core", "exec": "git commit" },
+          { "label": "Update Styles", "exec": "git commit" }
+        ]
+      },
+      {
+        "type": "text",
+        "value": "─── footer ───",
+        "style": { "color": "#e2e2e2", "margin-top": 1 }
+      }
+    ]
+  }
+}
