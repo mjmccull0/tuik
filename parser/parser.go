@@ -3,6 +3,7 @@ package parser
 import (
   "github.com/charmbracelet/bubbles/textinput"
 	"encoding/json"
+	"fmt"
 	"tuik/components"
 )
 
@@ -126,4 +127,33 @@ func extractStyles(s map[string]interface{}) components.StyleConfig {
 	}
 
 	return styles
+}
+
+func validate(cfg *components.Config) error {
+	if _, ok := cfg.Views[cfg.Main]; !ok {
+		return fmt.Errorf("main view '%s' is not defined in views", cfg.Main)
+	}
+
+	for viewID, view := range cfg.Views {
+		for _, child := range view.Children {
+			if err := validateComponent(child); err != nil {
+				return fmt.Errorf("view '%s': %w", viewID, err)
+			}
+		}
+	}
+	return nil
+}
+
+func validateComponent(c components.Component) error {
+	if c.GetID() == "" && c.GetType() != "box" {
+		return fmt.Errorf("component of type '%s' is missing a required ID", c.GetType())
+	}
+
+	// Type assertion to check Box children
+	if box, ok := c.(*components.Box); ok {
+		if box.Child == nil {
+			return fmt.Errorf("box component contains no child")
+		}
+	}
+	return nil
 }
