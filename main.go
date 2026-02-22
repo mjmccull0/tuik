@@ -1,43 +1,47 @@
 package main
 
 import (
-	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
-	"fmt"
-  "github.com/charmbracelet/lipgloss"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"tuik/ui"
+
+	"tuik/components"
+	"tuik/parser"
 )
 
 type model struct {
-	registry map[string]*ui.Component
-	focusIndex int               // Track which child is active (0, 1, 2...)
-	active   string // The ID of the current view
-	cursor   int
-	store    map[string]string
-	focus    string
+	registry   map[string]*components.View
+	active     string
+	focusIndex int
 }
 
-func initialModel(cfg ui.Config) model {
-	return model{
+func initialModel(cfg components.Config) model {
+	m := model{
 		registry: cfg.Views,
 		active:   cfg.Main,
-		cursor:   0,
-		store:    make(map[string]string), // CRITICAL: Initialize the map
 	}
+
+	// Helper to find initial focus
+	if view, ok := m.registry[m.active]; ok {
+		for i, child := range view.Children {
+			if child.IsFocusable() {
+				m.focusIndex = i
+				break
+			}
+		}
+	}
+
+	return m
 }
 
-func interpolate(action string, store map[string]string) string {
-    for key, val := range store {
-        action = strings.ReplaceAll(action, "{{."+key+"}}", val)
-    }
-    return action
+func (m model) Init() tea.Cmd {
+	return textinput.Blink 
 }
-
-func (m model) Init() tea.Cmd { return nil }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	view := m.registry[m.active]
@@ -45,115 +49,127 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	activeComp := &view.Children[m.focusIndex]
+	activeComp := view.Children[m.focusIndex]
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		// --- SECTION 1: TEXT INPUT HANDLING ---
-		// Priority: Capture typing before navigation
-		if activeComp.GetType() == "text-input" {
-			switch msg.String() {
-			case "tab", "shift+tab", "enter", "esc":
-				// Exit typing mode: continue to navigation logic
-			case "backspace":
-				curr := m.store[activeComp.ID]
-				if len(curr) > 0 {
-					m.store[activeComp.ID] = curr[:len(curr)-1]
-				}
-				return m, nil
-			default:
-				// Capture letters, symbols, and spaces
-				if len(msg.String()) == 1 {
-					m.store[activeComp.ID] += msg.String()
-				}
-				return m, nil
-			}
-		}
-
-		// --- SECTION 2: GLOBAL NAVIGATION ---
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 
 		case "tab":
-			// Discovery loop: find next focusable item
+			// Navigation logic
 			for i := 0; i < len(view.Children); i++ {
 				m.focusIndex = (m.focusIndex + 1) % len(view.Children)
 				if view.Children[m.focusIndex].IsFocusable() {
 					break
 				}
 			}
-			m.cursor = 0
-			return m, nil
-
-		case "up", "k":
-			if activeComp.GetType() == "list" && m.cursor > 0 {
-				m.cursor--
-			}
-			return m, nil
-
-		case "down", "j":
-			if activeComp.GetType() == "list" && m.cursor < len(activeComp.Items)-1 {
-				m.cursor++
-			}
 			return m, nil
 
 		case "enter", " ":
-			// Resolve the action string and inject variables
-			action := interpolate(activeComp.GetActionAt(m.cursor), m.store)
+			// 1. Gather action string from component
+			actionStr := activeComp.GetAction()
+
+			// 2. Collect state for interpolation
+			localData := make(map[string]string)
+			for _, child := range view.Children {
+				if id := child.GetID(); id != "" {
+					localData[id] = child.GetValue()
+				}
+			}
+
+			// 3. Interpolate using a local helper or move to parser package
+			action := interpolate(actionStr, localData)
 			if action == "" {
 				return m, nil
 			}
 
-			// View Swap Logic
-			if _, isView := m.registry[action]; isView {
+			// 4. View Swap Check
+			if _, exists := m.registry[action]; exists {
 				m.active = action
-				m.cursor = 0
-				m.focusIndex = 0
-				// Ensure new view starts on a focusable item
-				for i := 0; i < len(m.registry[m.active].Children); i++ {
-					if m.registry[m.active].Children[m.focusIndex].IsFocusable() {
+				// Reset focus for the new view
+				for i, child := range m.registry[m.active].Children {
+					if child.IsFocusable() {
+						m.focusIndex = i
 						break
 					}
-					m.focusIndex = (m.focusIndex + 1) % len(m.registry[m.active].Children)
 				}
 				return m, nil
 			}
 
-			// Shell Execution Logic
-			c := strings.Fields(action)
-			if len(c) > 0 {
-				return m, tea.ExecProcess(exec.Command(c[0], c[1:]...), func(err error) tea.Msg {
+			// 5. Shell Execution
+			cParts := strings.Fields(action)
+			if len(cParts) > 0 {
+				return m, tea.ExecProcess(exec.Command(cParts[0], cParts[1:]...), func(err error) tea.Msg {
 					return nil
 				})
 			}
 		}
+
+		// DELEGATION: Pass the message to the active component
+		newComp, cmd := activeComp.Update(msg)
+		view.Children[m.focusIndex] = newComp
+		return m, cmd
 	}
+
 	return m, nil
 }
 
 func (m model) View() string {
-    view := m.registry[m.active]
-    var rendered []string
-    for i := range view.Children {
-        // Pass 'true' only if this child is the currently focused index
-        isFocused := (i == m.focusIndex)
-        rendered = append(rendered, view.Children[i].Render(ui.StyleContext{},m.cursor, isFocused, m.store))
+	view := m.registry[m.active]
+	if view == nil {
+		return "Error: View not found"
+	}
 
-    }
-    return lipgloss.JoinVertical(lipgloss.Left, rendered...)
+	var rendered []string
+	for i, child := range view.Children {
+		// SAFETY CHECK: If the parser returned nil for a component
+		if child == nil {
+			rendered = append(rendered, "[Invalid Component]")
+			continue
+		}
+
+		ctx := components.RenderContext{
+			IsFocused: (i == m.focusIndex),
+		}
+		rendered = append(rendered, child.Render(ctx))
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, rendered...)
+}
+
+// Simple interpolation helper inside main
+func interpolate(text string, data map[string]string) string {
+	for k, v := range data {
+		text = strings.ReplaceAll(text, "{{."+k+"}}", v)
+	}
+	return text
 }
 
 func main() {
-    // 1. Load your JSON config
-    content, _ := os.ReadFile("tuik.json")
-    var cfg ui.Config
-    json.Unmarshal(content, &cfg)
+	if len(os.Args) < 2 {
+    fmt.Println("Usage: tuik <config.json>")
+    os.Exit(0)
+  }
 
-    // 2. Initialize the model with the store allocated
-    p := tea.NewProgram(initialModel(cfg))
-    if _, err := p.Run(); err != nil {
-        fmt.Printf("Error: %v", err)
-        os.Exit(1)
-    }
+	configFile := os.Args[1]
+
+	content, err := os.ReadFile(configFile)
+	if err != nil {
+		fmt.Printf("File error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Use our new parser package
+	cfg, err := parser.ParseConfig(content)
+	if err != nil {
+		fmt.Printf("Parse error: %v\n", err)
+		os.Exit(1)
+	}
+
+	p := tea.NewProgram(initialModel(cfg))
+	if _, err := p.Run(); err != nil {
+		fmt.Printf("Runtime error: %v\n", err)
+		os.Exit(1)
+	}
 }
