@@ -28,9 +28,10 @@ func initialModel(cfg components.Config) model {
 
 	// Helper to find initial focus
 	if view, ok := m.registry[m.active]; ok {
-		for i, child := range view.Children {
-			if child.IsFocusable() {
+		for i  := range view.Children {
+			if view.Children[i].IsFocusable() {
 				m.focusIndex = i
+				view.Children[i].Focus()
 				break
 			}
 		}
@@ -58,62 +59,57 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case "tab":
-			// Navigation logic
+			view.Children[m.focusIndex].Blur()
+
 			for i := 0; i < len(view.Children); i++ {
 				m.focusIndex = (m.focusIndex + 1) % len(view.Children)
 				if view.Children[m.focusIndex].IsFocusable() {
 					break
 				}
 			}
-			return m, nil
 
-		case "enter", " ":
-			// 1. Gather action string from component
+			view.Children[m.focusIndex].Focus()
+			return m, textinput.Blink 
+
+		case "enter":
 			actionStr := activeComp.GetAction()
-
-			// 2. Collect state for interpolation
 			localData := make(map[string]string)
-			for _, child := range view.Children {
-				if id := child.GetID(); id != "" {
-					localData[id] = child.GetValue()
-				}
-			}
-
-			// 3. Interpolate using a local helper or move to parser package
 			action := interpolate(actionStr, localData)
-			if action == "" {
-				return m, nil
-			}
 
-			// 4. View Swap Check
+			// View Swap
 			if _, exists := m.registry[action]; exists {
 				m.active = action
-				// Reset focus for the new view
-				for i, child := range m.registry[m.active].Children {
-					if child.IsFocusable() {
+				m.focusIndex = 0
+
+				activeView := m.registry[m.active]
+				for i := range activeView.Children {
+					if activeView.Children[i].IsFocusable() {
 						m.focusIndex = i
+						activeView.Children[i].Focus()
 						break
 					}
 				}
-				return m, nil
+
+				return m, textinput.Blink
 			}
 
-			// 5. Shell Execution
+			// Execution
 			cParts := strings.Fields(action)
 			if len(cParts) > 0 {
 				return m, tea.ExecProcess(exec.Command(cParts[0], cParts[1:]...), func(err error) tea.Msg {
 					return nil
 				})
 			}
+			// IMPORTANT: Return here so "Enter" isn't passed to the component
+			return m, nil
 		}
-
-		// DELEGATION: Pass the message to the active component
-		newComp, cmd := activeComp.Update(msg)
-		view.Children[m.focusIndex] = newComp
-		return m, cmd
 	}
 
-	return m, nil
+	// DELEGATION: This handles typing (KeyMsg) AND blinking (BlinkMsg)
+	newComp, cmd := activeComp.Update(msg)
+	view.Children[m.focusIndex] = newComp
+
+	return m, cmd
 }
 
 func (m model) View() string {

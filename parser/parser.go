@@ -71,7 +71,7 @@ func ParseComponent(data map[string]interface{}) components.Component {
 		ti.CharLimit = 156
 		ti.Width = 20
 
-		base = components.TextInput{
+		base = &components.TextInput{
 			ID:          id,
 			Placeholder: placeholder,
 			Model:       ti, // Pass the initialized model here

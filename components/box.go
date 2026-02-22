@@ -28,6 +28,18 @@ func (b Box) Update(msg tea.Msg) (Component, tea.Cmd) {
 	return Box{Styles: b.Styles, Child: newChild}, cmd
 }
 
+func (b Box) Focus() {
+	if b.Child != nil {
+		b.Child.Focus()
+	}
+}
+
+func (b Box) Blur() {
+	if b.Child != nil {
+		b.Child.Blur()
+	}
+}
+
 func (b Box) IsFocusable() bool { return b.Child.IsFocusable() }
 func (b Box) GetType() string   { return b.Child.GetType() }
 func (b Box) GetID() string     { return b.Child.GetID() }

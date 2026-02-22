@@ -45,6 +45,8 @@ func (l List) Update(msg tea.Msg) (Component, tea.Cmd) {
 	return l, nil
 }
 
+func (l List) Blur() {}
+func (l List) Focus() {}
 func (l List) IsFocusable() bool { return true }
 func (l List) GetType()    string { return "list" }
 func (l List) GetID() string     { return "" }

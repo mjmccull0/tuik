@@ -19,6 +19,8 @@ func (t Text) Render(ctx RenderContext) string {
 	return style.Render(t.Content)
 }
 
+func (t Text) Blur() {}
+func (t Text) Focus() {}
 func (t Text) Update(msg tea.Msg) (Component, tea.Cmd) { return t, nil }
 func (t Text) IsFocusable() bool { return false }
 func (t Text) GetType() string   { return "text" }

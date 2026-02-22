@@ -4,6 +4,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
   "github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	//"fmt"
 )
 
 type TextInput struct {
@@ -14,29 +15,24 @@ type TextInput struct {
 }
 
 func (t TextInput) Render(ctx RenderContext) string {
-	// 1. Tell the library model whether it should show a cursor or not
-	if ctx.IsFocused {
-		t.Model.Focus()
-	} else {
-		t.Model.Blur()
-	}
-
-	// 2. Apply your custom container styling
 	style := lipgloss.NewStyle().PaddingLeft(1).Width(30)
 	
 	if ctx.IsFocused {
 		return style.Border(lipgloss.NormalBorder()).
 			BorderForeground(lipgloss.Color("63")).
-			Render(t.Model.View()) // Render the library view (with cursor)
+			Render(t.Model.View()) 
 	}
 	
 	return style.Border(lipgloss.HiddenBorder()).
 		Underline(true).
 		Foreground(lipgloss.Color("240")). 
-		Render(t.Model.View()) // Render the blurred library view
+		Render(t.Model.View())
 }
 
-func (t TextInput) Update(msg tea.Msg) (Component, tea.Cmd) {
+func (t *TextInput) Update(msg tea.Msg) (Component, tea.Cmd) {
+	// if k, ok := msg.(tea.KeyMsg); ok {
+  //       fmt.Printf("Input received key: %s\n", k.String())
+	// }
 	var cmd tea.Cmd
 	
 	// 1. Let the library handle all the complex keyboard logic (backspace, etc.)
@@ -46,6 +42,14 @@ func (t TextInput) Update(msg tea.Msg) (Component, tea.Cmd) {
 	t.Content = t.Model.Value()
 
 	return t, cmd 
+}
+
+func (t *TextInput) Focus() {
+	t.Model.Focus()
+}
+
+func (t *TextInput) Blur() {
+	t.Model.Blur()
 }
 
 func (t TextInput) GetValue() string { return t.Content }

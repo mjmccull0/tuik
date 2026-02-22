@@ -10,6 +10,10 @@ type RenderContext struct {
 type Component interface {
 	Render(ctx RenderContext) string
 	Update(msg tea.Msg) (Component, tea.Cmd)
+
+	Focus()
+	Blur()
+
 	IsFocusable() bool
 	GetType() string
 	GetID() string
