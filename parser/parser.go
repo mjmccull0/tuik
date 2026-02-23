@@ -7,6 +7,19 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 )
 
+
+func parseStaticItems(raw []interface{}) []components.ListItem {
+    var items []components.ListItem
+    for _, it := range raw {
+        if m, ok := it.(map[string]interface{}); ok {
+            txt, _ := m["text"].(string)
+            act, _ := m["on-press"].(string)
+            items = append(items, components.ListItem{Text: txt, OnPress: act})
+        }
+    }
+    return items
+}
+
 func ParseConfig(data []byte) (components.Config, error) {
 	var raw struct {
 		Main  string `json:"main"`
@@ -78,24 +91,32 @@ func ParseComponent(data map[string]interface{}) components.Component {
 			Model:       ti,
 		}
 
-	case "list":
-		id, _ := data["id"].(string)
-		onSelect, _ := data["on-select"].(string)
-		var items []components.ListItem
-		if itemsRaw, ok := data["items"].([]interface{}); ok {
-			for _, it := range itemsRaw {
-				if m, ok := it.(map[string]interface{}); ok {
-					txt, _ := m["text"].(string)
-					act, _ := m["on-press"].(string)
-					items = append(items, components.ListItem{Text: txt, OnPress: act})
-				}
-			}
-		}
-		inputData := data["input"]
-		if inputData == nil {
-			inputData = items
-		}
-		base = &components.List{ID: id, Input: inputData, OnSelect: onSelect}
+  case "list":
+    id, _ := data["id"].(string)
+    onSelect, _ := data["on-select"].(string)
+    
+    var inputData interface{}
+
+    // 1. Check for the new "input" key first
+    if rawInput, ok := data["input"]; ok {
+        switch v := rawInput.(type) {
+        case string:
+            // It's a command! Store the string for the Navigator to hydrate later
+            inputData = v
+        case []interface{}:
+            // It's a static list! Convert it to []ListItem
+            inputData = parseStaticItems(v)
+        }
+    } else if itemsRaw, ok := data["items"].([]interface{}); ok {
+        // 2. Fallback for your existing "items" key
+        inputData = parseStaticItems(itemsRaw)
+    }
+
+    base = &components.List{
+        ID:       id, 
+        Input:    inputData, 
+        OnSelect: onSelect,
+    }
 
 	case "box":
 		id, _ := data["id"].(string)

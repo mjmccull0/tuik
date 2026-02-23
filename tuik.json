@@ -1,36 +1,39 @@
 {
-  "main": "dashboard",
+  "main": "branch-picker",
   "views": {
-    "dashboard": {
+    "branch-picker": {
       "style": { "padding": 1 },
       "children": [
+        { "text": "󱓞 Select a Branch", "style": { "bold": true, "margin-bottom": 1 } },
         {
           "type": "list",
-          "items": [
-            { 
-              "text": "󰊢 Open Git Operations", 
-              "on-press": "git-ops" 
-            },
-            { 
-              "text": " Quick Status", 
-              "on-press": "git status" 
-            }
-          ]
-        },
-        { "text": "Current View: Dashboard", "style": { "italic": true, "margin-top": 1 } }
+          "id": "selected_branch",
+          "input": "git branch --format='%(refname:short)'",
+          "on-select": "view:branch-ops"
+        }
       ]
     },
-    "git-ops": {
-      "style": { "padding": 1, "background-color": "#440000" },
+    "branch-ops": {
+      "style": { "padding": 1 },
       "children": [
+        { "text": "Operations for: {{.selected_branch}}", "style": { "foreground": "86" } },
         {
           "type": "list",
-          "items": [
-            { "text": "󰩈 Back to Main", "on-press": "dashboard" },
-            { "text": " View Commit Log", "on-press": "git log --oneline -n 10" }
+          "input": [
+            { 
+              "text": "󰘬 Checkout This Branch", 
+              "on-press": "git checkout {{.selected_branch}}" 
+            },
+            { 
+              "text": " View Full Log (Interactive)", 
+              "on-press": "shell:git log {{.selected_branch}}" 
+            },
+            { 
+              "text": "󰩈 Back to Picker", 
+              "on-press": "view:branch-picker" 
+            }
           ]
-        },
-        { "text": "Ops View Active", "style": { "bold": true, "margin-top": 1 } }
+        }
       ]
     }
   }

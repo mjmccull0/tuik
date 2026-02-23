@@ -21,30 +21,58 @@ type model struct {
 	width     int
 	height    int
 	logger    *log.Logger
+	lastOutput string
+}
+
+
+func (m model) resolveString(input string) string {
+    // Create a temporary Context object to use its Resolve method
+    ctx := components.Context{
+        Data: m.getContextData(),
+    }
+    return ctx.Resolve(input)
 }
 
 // getContextData gathers all current component values into a map for the navigator
 func (m model) getContextData() map[string]string {
-    data := make(map[string]string)
+	m.syncContext()
+	return m.navigator.Context.Data
+    // data := make(map[string]string)
     // You likely have a loop here that visits every component 
     // and calls GetValue(), similar to your existing sync logic.
-    return data
+    // return data
 }
 
-// executeShellCommand runs the resolved string (e.g., "git commit...") in the terminal
-func (m model) executeShellCommand(command string) tea.Cmd {
+// Define a new message type
+type shellOutputMsg string
+
+func (m model) executeShellCommand(cmdStr string) tea.Cmd {
     return func() tea.Msg {
-        // Using exec.Command to actually run the git logic
-        cmd := exec.Command("sh", "-c", command)
-        output, err := cmd.CombinedOutput()
+        cmd := exec.Command("sh", "-c", cmdStr)
+        output, _ := cmd.CombinedOutput()
         
-        if err != nil {
-            m.logger.Printf("Shell Error: %v, Output: %s", err, string(output))
-        } else {
-            m.logger.Printf("Shell Success: %s", string(output))
+        if m.logger != nil {
+            m.logger.Printf("Command Run: %s", cmdStr)
         }
-        return nil // Or a 'SuccessMsg' if you want to show a toast
+
+        // Return the output so Update() can catch it
+        return shellOutputMsg(string(output))
     }
+}
+
+// executeForegroundCommand suspends the TUI to run an interactive process
+func (m model) executeForegroundCommand(cmdStr string) tea.Cmd {
+	// We use tea.ExecProcess to handle the terminal hand-off
+	// It takes an *exec.Cmd and a function to return a msg when finished
+	c := exec.Command("sh", "-c", cmdStr)
+	return tea.ExecProcess(c, func(err error) tea.Msg {
+		if err != nil {
+			if m.logger != nil {
+				m.logger.Printf("Foreground Error: %v", err)
+			}
+		}
+		return nil // Return to the TUI normally
+	})
 }
 
 func (m *model) syncContext() {
@@ -103,9 +131,9 @@ func (m *model) pullComponentData(c components.Component) {
 
 func initialModel(cfg components.Config) model {
 	// 1. Create a clean map for the Views
-	viewMap := make(map[string]components.View)
+	viewMap := make(map[string]*components.View)
 	for k, v := range cfg.Views {
-		viewMap[k] = *v // Convert pointer to value if needed
+		viewMap[k] = v // Convert pointer to value if needed
 	}
 
 	// Initialize the Navigator with an empty data bucket
@@ -140,81 +168,97 @@ func (m model) Init() tea.Cmd {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// 1. Handle Global Keys and Logic
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		return m, nil // Don't propagate resize to children yet
+    switch msg := msg.(type) {
+    case tea.WindowSizeMsg:
+        m.width, m.height = msg.Width, msg.Height
+        return m, nil
 
-	case components.ActionMsg:
-		// 1. Log the action for debugging
-		m.logger.Printf("Action Triggered: %s (ID: %s)", msg.Action, msg.ID)
-		
-		// 2. Pass it to the navigator to handle view switching or commands
-		res := m.navigator.ProcessAction(msg.Action, m.getContextData())
-		
-		if res.Command != "" {
-			// This is where you'd run the actual shell command (e.g., git commit)
-			return m, m.executeShellCommand(res.Command)
-		}
-		return m, nil
+		case shellOutputMsg:
+			// Store it in the model so View() can see it
+			m.lastOutput = string(msg)
+			return m, nil
 
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "ctrl+c", "q":
-			return m, tea.Quit
+		case components.ActionMsg:
+			// 1. Get current data
+			ctxData := m.getContextData()
+			
+			// 2. Resolve the action string (this swaps {{.selected_branch}} for "main")
+			resolvedAction := m.navigator.Context.Resolve(msg.Action)
+			
+			// 3. Process the resolved action
+			res := m.navigator.ProcessAction(resolvedAction, ctxData)
+			
+			if res.NextViewID != "" {
+				m.lastOutput = ""
+				return m, nil
+			}
+			
+			if res.Command != "" {
+				// Use the same prefix logic here
+				if strings.HasPrefix(res.Command, "shell:") {
+					trimmedCmd := strings.TrimPrefix(res.Command, "shell:")
 
-		case "enter":
-			// A. Pull data from all components into the Context bucket
-			m.syncContext()
-    
-			// B. Find the focused component's action
-			view, _ := m.navigator.GetActiveView()
-			var action string
-			for _, child := range view.Children {
-				if child.IsFocusable() {
-					action = child.GetAction()
-					break 
+					return m, m.executeForegroundCommand(trimmedCmd)
 				}
+				return m, m.executeShellCommand(res.Command)
 			}
 
-			// C. Process the action through the Navigator
-			if action != "" {
-				res := m.navigator.ProcessAction(action, m.navigator.Context.Data)
-				
-				if res.IsUpdate {
-					// It was a view swap; just return to re-render the next view
-					return m, nil
-				} else if res.Command != "" {
-					// It was a shell command (like git status)
-					return m, m.execute(res.Command)
-				}
-			}
-		}
-	}
+    case tea.KeyMsg:
+        switch msg.String() {
+        case "ctrl+c", "q":
+            return m, tea.Quit
+			  case "esc":
+		        m.lastOutput = ""
+			      return m, nil
+        }
+    }
 
-	// 2. Standard Flow: Propagate the message down to the current view
-	view, ctx := m.navigator.GetActiveView()
-	ctx.Width = m.width
-	ctx.Height = m.height
+    // Standard Flow: Only propagate to the view if it wasn't a global key
+    view, ctx := m.navigator.GetActiveView()
+    ctx.Width, ctx.Height = m.width, m.height
 
-	updatedView, viewCmd := view.Update(msg, ctx)
-	
-	// 3. Persist the view state (cursor positions, text input buffers)
-	m.navigator.Views[m.navigator.ActiveViewID] = updatedView
+    updatedView, viewCmd := view.Update(msg, ctx)
+	  if v, ok := updatedView.(*components.View); ok {
+			m.navigator.Views[m.navigator.ActiveViewID] = v
+	  }
 
-	return m, viewCmd
+    return m, viewCmd
 }
 
 func (m model) View() string {
-	view, ctx := m.navigator.GetActiveView()
-	
-	// Pass the width/height again just to be sure
-	ctx.Width = m.width
-	ctx.Height = m.height
+    // 1. Get the current view from the navigator
+    view, ctx := m.navigator.GetActiveView()
+    
+    // 2. Render the components defined in your JSON
+    // This is the "Main Window"
+    mainContent := view.Render(ctx)
 
-	return view.Render(ctx)
+    // 3. If a command was run, append the result to the bottom
+    if m.lastOutput != "" {
+        // Create a style for the status bar
+        statusStyle := lipgloss.NewStyle().
+            Foreground(lipgloss.Color("86")). // Cyan-ish
+            Border(lipgloss.RoundedBorder(), true, false, false, false). // Top border only
+            BorderForeground(lipgloss.Color("240")).
+            Padding(1, 0).
+            Width(m.width)
+
+        // Trim output so it doesn't push the UI off-screen
+        lines := strings.Split(m.lastOutput, "\n")
+        if len(lines) > 8 {
+            lines = append(lines[:8], "... (truncated)")
+        }
+        displayOutput := strings.Join(lines, "\n")
+
+        // Combine the JSON UI and the Shell Output
+        return lipgloss.JoinVertical(
+            lipgloss.Left, 
+            mainContent, 
+            statusStyle.Render("  Last Command Output:\n"+displayOutput),
+        )
+    }
+
+    return mainContent
 }
 
 // collectData gathers all GetValue() results from the current view
@@ -247,29 +291,44 @@ func interpolate(text string, data map[string]string) string {
 }
 
 func main() {
-  if len(os.Args) < 2 {
-    fmt.Println("Usage: tuik <config.json>")
-    os.Exit(0)
-  }
+    if len(os.Args) < 2 {
+        fmt.Println("Usage: tuik <config.json>")
+        os.Exit(0)
+    }
 
-  configFile := os.Args[1]
+    // --- ADD THIS BLOCK ---
+    // 1. Setup Logging to a file so it doesn't mess up the TUI
+    f, err := tea.LogToFile("tuik.log", "debug")
+    if err != nil {
+        fmt.Printf("Could not open log file: %v\n", err)
+        os.Exit(1)
+    }
+    defer f.Close()
+    
+    // Create the standard logger instance
+    logger := log.New(f, "", log.LstdFlags)
+    // -----------------------
 
-  content, err := os.ReadFile(configFile)
-  if err != nil {
-    fmt.Printf("File error: %v\n", err)
-    os.Exit(1)
-  }
+    configFile := os.Args[1]
+    content, err := os.ReadFile(configFile)
+    if err != nil {
+        fmt.Printf("File error: %v\n", err)
+        os.Exit(1)
+    }
 
-  // Use our new parser package
-  cfg, err := parser.ParseConfig(content)
-  if err != nil {
-    fmt.Printf("Parse error: %v\n", err)
-    os.Exit(1)
-  }
+    cfg, err := parser.ParseConfig(content)
+    if err != nil {
+        fmt.Printf("Parse error: %v\n", err)
+        os.Exit(1)
+    }
 
-  p := tea.NewProgram(initialModel(cfg))
-  if _, err := p.Run(); err != nil {
-    fmt.Printf("Runtime error: %v\n", err)
-    os.Exit(1)
-  }
+    // 2. Pass the logger into the initial model
+    m := initialModel(cfg)
+    m.logger = logger 
+
+    p := tea.NewProgram(m)
+    if _, err := p.Run(); err != nil {
+        fmt.Printf("Runtime error: %v\n", err)
+        os.Exit(1)
+    }
 }

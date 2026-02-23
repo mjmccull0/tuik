@@ -7,6 +7,7 @@ import (
 )
 
 
+
 type Context struct {
 	// Data holds the variables for template resolution (e.g., "selected_file")
 	Data map[string]string
@@ -96,7 +97,7 @@ type List struct {
 	ID       string
 	Input    any
 	OnSelect string
-	cursor   int
+	Cursor   int
 }
 
 type ListItem struct {
@@ -104,49 +105,25 @@ type ListItem struct {
 	OnPress  string `json:"on-press,omitempty"`
 }
 
-func (v View) Render(ctx Context) string {
-	// 1. Ensure the context has a map initialized
-	if ctx.Data == nil {
-		ctx.Data = make(map[string]string)
-	}
-
-	// 2. Merge View's local Context into the render Context
-	// We cast the interface{} to string here
-	for k, val := range v.Context {
-		if strVal, ok := val.(string); ok {
-			ctx.Data[k] = strVal
-		}
-	}
-
-	var b strings.Builder
-	for _, child := range v.Children {
-		// 3. Now children receive a context that actually contains the data
-		b.WriteString(child.Render(ctx))
-		b.WriteString("\n")
-	}
-
-	return b.String()
-}
-
-func (v View) Update(msg tea.Msg, ctx Context) (View, tea.Cmd) {
-	// 1. Merge local context so children have it during updates
-	if ctx.Data == nil {
-		ctx.Data = make(map[string]string)
-	}
-	for k, val := range v.Context {
-		if strVal, ok := val.(string); ok {
-			ctx.Data[k] = strVal
-		}
-	}
-
+// Ensure View is a pointer in the navigator map
+// type Navigator struct { Views map[string]*View ... }
+func (v *View) Update(msg tea.Msg, ctx Context) (Component, tea.Cmd) {
 	var cmds []tea.Cmd
 	for i, child := range v.Children {
-		// 2. Update each child with the populated context
-		newChild, cmd := child.Update(msg, ctx)
-		v.Children[i] = newChild
+		// Update each child
+		newComp, cmd := child.Update(msg, ctx)
+		v.Children[i] = newComp
 		cmds = append(cmds, cmd)
 	}
-	return v, tea.Batch(cmds...)
+	return v, tea.Batch(cmds...) // Return 'v' as the pointer
+}
+
+func (v *View) Render(ctx Context) string {
+	var sections []string
+	for _, child := range v.Children {
+		sections = append(sections, child.Render(ctx))
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, sections...)
 }
 
 // ActionMsg is sent when a component (like a Button) is activated
@@ -175,3 +152,13 @@ func (s StyleConfig) ToLipgloss() lipgloss.Style {
 
 	return style
 }
+
+func (v *View) Blur() {} // Add this!
+func (v *View) Focus() {} // Add this too, just in case
+
+// Ensure these exist so View can be treated as a Component
+func (v *View) GetID() string     { return v.ID }
+func (v *View) GetType() string   { return "view" }
+func (v *View) GetAction() string { return "" }
+func (v *View) GetValue() string  { return "" }
+func (v *View) IsFocusable() bool { return false }
