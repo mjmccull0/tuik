@@ -12,34 +12,101 @@ import (
 
   "tuik/components"
   "tuik/parser"
+	"tuik/utils"
 )
 
 type model struct {
-  registry   map[string]*components.View
-  active     string
-  focusIndex int
   navigator *Navigator
+	width     int
+	height    int
+}
+
+func (m *model) syncContext() {
+	view, _ := m.navigator.GetActiveView()
+	// Ensure the data map is initialized
+	if m.navigator.Context.Data == nil {
+		m.navigator.Context.Data = make(map[string]string)
+	}
+	
+	// Use recursion to find data in nested components (like Lists inside Boxes)
+	for _, child := range view.Children {
+		m.extractData(child)
+	}
+}
+
+func (m *model) extractData(c components.Component) {
+    if c == nil { return }
+
+    // If it's a Box, drill down into its children
+    if c.GetType() == "box" {
+        if box, ok := c.(*components.Box); ok {
+            for _, sub := range box.Children {
+                m.extractData(sub)
+            }
+            return
+        }
+    }
+
+    // If the component has an ID (like "selected_file"), save its value
+    if id := c.GetID(); id != "" {
+        val := c.GetValue()
+        m.navigator.Context.Data[id] = val
+        // This will now show up in tuik.log
+        utils.Log("Synced: %s = %s", id, val)
+    }
+}
+
+// New helper to handle nested components (Boxes inside Boxes)
+func (m *model) pullComponentData(c components.Component) {
+    // 1. If it's a Box, look at its children
+    if c.GetType() == "box" {
+        // We need to type-assert to get to the Children slice
+        if box, ok := c.(*components.Box); ok {
+            for _, subChild := range box.Children {
+                m.pullComponentData(subChild)
+            }
+        }
+        return
+    }
+
+    // 2. If it's a data component with an ID, grab the value
+    if id := c.GetID(); id != "" {
+        m.navigator.Context.Data[id] = c.GetValue()
+    }
 }
 
 func initialModel(cfg components.Config) model {
-  m := model{
-    registry: cfg.Views,
-    active:   cfg.Main,
-    navigator: &Navigator{Registry: cfg.Views, ActiveView: cfg.Main},
-  }
+	// 1. Create a clean map for the Views
+	viewMap := make(map[string]components.View)
+	for k, v := range cfg.Views {
+		viewMap[k] = *v // Convert pointer to value if needed
+	}
 
-  // Helper to find initial focus
-  if view, ok := m.registry[m.active]; ok {
-    for i  := range view.Children {
-      if view.Children[i].IsFocusable() {
-        m.focusIndex = i
-        view.Children[i].Focus()
-        break
-      }
-    }
-  }
+	// Initialize the Navigator with an empty data bucket
+	nav := &Navigator{
+		Views:        viewMap,
+		ActiveViewID: cfg.Main,
+		Context: components.Context{
+			Data:   make(map[string]string),
+			Styles: make(map[string]lipgloss.Style),
+		},
+	}
 
-  return m
+	// Initial focus logic: We tell the current view to focus its first focusable child
+	if view, ok := nav.Views[nav.ActiveViewID]; ok {
+		for i := range view.Children {
+			if view.Children[i].IsFocusable() {
+				view.Children[i].Focus()
+				// Update the view back in the registry since Focus() might change internal state
+				nav.Views[nav.ActiveViewID] = view
+				break
+			}
+		}
+	}
+
+	m := model{navigator: nav}
+	m.syncContext()
+	return m
 }
 
 func (m model) Init() tea.Cmd {
@@ -47,89 +114,68 @@ func (m model) Init() tea.Cmd {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-  view := m.registry[m.active]
-  if view == nil || len(view.Children) == 0 {
-    return m, nil
-  }
+	// 1. Handle Global Keys and Logic
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		return m, nil // Don't propagate resize to children yet
 
-  activeComp := view.Children[m.focusIndex]
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "ctrl+c", "q":
+			return m, tea.Quit
 
-  switch msg := msg.(type) {
-  case tea.KeyMsg:
-    switch msg.String() {
-    case "q", "ctrl+c":
-      return m, tea.Quit
+		case "enter":
+			// A. Pull data from all components into the Context bucket
+			m.syncContext()
+    
+			// B. Find the focused component's action
+			view, _ := m.navigator.GetActiveView()
+			var action string
+			for _, child := range view.Children {
+				if child.IsFocusable() {
+					action = child.GetAction()
+					break 
+				}
+			}
 
-    case "tab":
-      view.Children[m.focusIndex].Blur()
+			// C. Process the action through the Navigator
+			if action != "" {
+				res := m.navigator.ProcessAction(action, m.navigator.Context.Data)
+				
+				if res.IsUpdate {
+					// It was a view swap; just return to re-render the next view
+					return m, nil
+				} else if res.Command != "" {
+					// It was a shell command (like git status)
+					return m, m.execute(res.Command)
+				}
+			}
+		}
+	}
 
-      for i := 0; i < len(view.Children); i++ {
-        m.focusIndex = (m.focusIndex + 1) % len(view.Children)
-        if view.Children[m.focusIndex].IsFocusable() {
-          break
-        }
-      }
+	// 2. Standard Flow: Propagate the message down to the current view
+	view, ctx := m.navigator.GetActiveView()
+	ctx.Width = m.width
+	ctx.Height = m.height
 
-      view.Children[m.focusIndex].Focus()
-      return m, textinput.Blink 
+	updatedView, viewCmd := view.Update(msg, ctx)
+	
+	// 3. Persist the view state (cursor positions, text input buffers)
+	m.navigator.Views[m.navigator.ActiveViewID] = updatedView
 
-    case "enter":
-      data := collectData(view)
-      result := m.navigator.ProcessAction(activeComp.GetAction(), data)
-
-      if result.IsUpdate {
-        m.active = result.NextView
-        m.focusIndex = 0 // Reset focusIndex to top of new view
-
-        // Set focus on first focusable child
-        activeView := m.registry[m.active]
-        for i := range activeView.Children {
-          if activeView.Children[i].IsFocusable() {
-            m.focusIndex = i
-            activeView.Children[i].Focus()
-            break
-          }
-        }
-
-        return m, textinput.Blink
-      }
-
-      if result.Command != "" {
-        return m, m.execute(result.Command)
-      }
-
-      // IMPORTANT: Return here so "Enter" isn't passed to the component
-      return m, nil
-    }
-  }
-
-  // DELEGATION: This handles typing (KeyMsg) AND blinking (BlinkMsg)
-  newComp, cmd := activeComp.Update(msg)
-  view.Children[m.focusIndex] = newComp
-
-  return m, cmd
+	return m, viewCmd
 }
 
 func (m model) View() string {
-  view := m.registry[m.active]
-  if view == nil {
-    return "Error: View not found"
-  }
+	view, ctx := m.navigator.GetActiveView()
+	
+	// Pass the width/height again just to be sure
+	ctx.Width = m.width
+	ctx.Height = m.height
 
-  var rendered []string
-  for i, child := range view.Children {
-    // SAFETY CHECK: If the parser returned nil for a component
-    if child == nil {
-      rendered = append(rendered, "[Invalid Component]")
-      continue
-    }
-
-    ctx := components.RenderContext{
-      IsFocused: (i == m.focusIndex),
-    }
-    rendered = append(rendered, child.Render(ctx))
-  }
-  return lipgloss.JoinVertical(lipgloss.Left, rendered...)
+	return view.Render(ctx)
 }
 
 // collectData gathers all GetValue() results from the current view

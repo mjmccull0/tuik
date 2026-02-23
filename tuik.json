@@ -7,31 +7,30 @@
         {
           "type": "list",
           "items": [
-            { "text": "󰊢 Git Operations", "on-press": "git-ops" },
-            { "text": "󰄬 Quick Status", "on-press": "git status" }
+            { 
+              "text": "󰊢 Open Git Operations", 
+              "on-press": "git-ops" 
+            },
+            { 
+              "text": " Quick Status", 
+              "on-press": "git status" 
+            }
           ]
-        }
+        },
+        { "text": "Current View: Dashboard", "style": { "italic": true, "margin-top": 1 } }
       ]
     },
     "git-ops": {
-      "style": { "padding": 1, "background-color": "#1a1a1a" },
+      "style": { "padding": 1, "background-color": "#440000" },
       "children": [
-        { "text": "NEW COMMIT", "style": { "bold": true, "color": "#ff5555" } },
-        { 
-          "type": "text-input", 
-          "id": "commit_msg", 
-          "style": { "margin-top": 1, "margin-bottom": 1 } 
-        },
         {
           "type": "list",
           "items": [
-            { 
-              "text": "🚀 Execute Commit", 
-              "on-press": "git commit -m '{{.commit_msg}}'" 
-            },
-            { "text": "󰩈 Cancel", "on-press": "dashboard" }
+            { "text": "󰩈 Back to Main", "on-press": "dashboard" },
+            { "text": " View Commit Log", "on-press": "git log --oneline -n 10" }
           ]
-        }
+        },
+        { "text": "Ops View Active", "style": { "bold": true, "margin-top": 1 } }
       ]
     }
   }

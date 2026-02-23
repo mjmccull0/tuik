@@ -6,8 +6,10 @@ import (
 )
 
 type Navigator struct {
-  Registry   map[string]*components.View
-  ActiveView string
+	Views          map[string]components.View
+  ActiveViewID     string
+	Context components.Context
+	
 }
 
 type NavResult struct {
@@ -17,15 +19,20 @@ type NavResult struct {
 }
 
 func (n *Navigator) ProcessAction(action string, data map[string]string) NavResult {
-  // 1. Interpolate first
-  interpolated := interpolate(action, data)
+	// 1. Interpolate first (replaces {{.vars}} in the action string)
+	interpolated := interpolate(action, data)
 
-  // 2. Check if it's a view swap
-  if _, exists := n.Registry[interpolated]; exists {
-    n.ActiveView = interpolated
-    return NavResult{NextView: interpolated, IsUpdate: true}
-  }
+	// 2. Check if it's a view swap
+	// We check n.Views (our Registry) and update n.ActiveViewID
+	if _, exists := n.Views[interpolated]; exists {
+		n.ActiveViewID = interpolated
+		return NavResult{NextView: interpolated, IsUpdate: true}
+	}
 
-  // 3. Otherwise, it's a shell command
-  return NavResult{Command: interpolated, IsUpdate: false}
+	// 3. Otherwise, it's a shell command (git commit, etc.)
+	return NavResult{Command: interpolated, IsUpdate: false}
+}
+
+func (n *Navigator) GetActiveView() (components.View, components.Context) {
+    return n.Views[n.ActiveViewID], n.Context
 }

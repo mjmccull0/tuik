@@ -1,10 +1,11 @@
 package parser
 
 import (
-  "github.com/charmbracelet/bubbles/textinput"
 	"encoding/json"
 	"fmt"
 	"tuik/components"
+
+	"github.com/charmbracelet/bubbles/textinput"
 )
 
 // ParseConfig converts the raw JSON bytes into a structured component registry.
@@ -28,7 +29,7 @@ func ParseConfig(data []byte) (components.Config, error) {
 
 	for viewID, viewData := range raw.Views {
 		v := &components.View{ID: viewID}
-		
+
 		for _, childData := range viewData.Children {
 			comp := ParseComponent(childData)
 			if comp != nil {
@@ -41,11 +42,9 @@ func ParseConfig(data []byte) (components.Config, error) {
 	return config, nil
 }
 
-// ParseComponent is the factory that maps JSON data to Go structs.
 func ParseComponent(data map[string]interface{}) components.Component {
 	typ, _ := data["type"].(string)
 
-	// Fallback: If 'type' is missing but 'text' is present, treat as a Text component.
 	if typ == "" {
 		if _, hasText := data["text"]; hasText {
 			typ = "text"
@@ -62,44 +61,80 @@ func ParseComponent(data map[string]interface{}) components.Component {
 		}
 		base = components.Text{Content: content}
 
-  case "text-input":
+	case "text-input":
 		id, _ := data["id"].(string)
 		placeholder, _ := data["placeholder"].(string)
-		
-		// Create the library model
 		ti := textinput.New()
 		ti.Placeholder = placeholder
-		ti.CharLimit = 156
-		ti.Width = 20
-
+		ti.Focus()
 		base = &components.TextInput{
 			ID:          id,
 			Placeholder: placeholder,
-			Model:       ti, // Pass the initialized model here
+			Model:       ti,
 		}
 
 	case "list":
-		itemsRaw, _ := data["items"].([]interface{})
+		id, _ := data["id"].(string)
+		onSelect, _ := data["on-select"].(string)
 		var items []components.ListItem
-		for _, it := range itemsRaw {
-			m, _ := it.(map[string]interface{})
-			items = append(items, components.ListItem{
-				Text:    m["text"].(string),
-				OnPress: m["on-press"].(string),
-			})
+		if itemsRaw, ok := data["items"].([]interface{}); ok {
+			for _, it := range itemsRaw {
+				if m, ok := it.(map[string]interface{}); ok {
+					txt, _ := m["text"].(string)
+					act, _ := m["on-press"].(string)
+					items = append(items, components.ListItem{Text: txt, OnPress: act})
+				}
+			}
 		}
-		base = components.List{Items: items}
+		inputData := data["input"]
+		if inputData == nil {
+			inputData = items
+		}
+		base = components.List{ID: id, Input: inputData, OnSelect: onSelect}
+
+	case "box":
+		id, _ := data["id"].(string)
+		vertical, _ := data["vertical"].(bool)
+		var children []components.Component
+		if childrenRaw, ok := data["children"].([]interface{}); ok {
+			for _, childData := range childrenRaw {
+				if m, ok := childData.(map[string]interface{}); ok {
+					if c := ParseComponent(m); c != nil {
+						children = append(children, c)
+					}
+				}
+			}
+		}
+		// FIX: Return the pointer directly here
+		base = &components.Box{
+			ID:       id,
+			Children: children,
+			Vertical: vertical,
+		}
+
+	case "button":
+		text, _ := data["text"].(string)
+		action, _ := data["on-select"].(string)
+		if action == "" {
+			action, _ = data["on-press"].(string)
+		}
+		id, _ := data["id"].(string)
+		base = &components.Button{
+			ID:     id,
+			Text:   text,
+			Action: action,
+		}
 
 	default:
-		// Return nil if the type is unknown to avoid crashing the engine.
 		return nil
 	}
 
-	// Style Wrapping: Check if a nested 'style' object exists.
+	// FIX: Style Wrapping - must return &components.Box
 	if styleData, ok := data["style"].(map[string]interface{}); ok {
-		return components.Box{
-			Child:  base,
-			Styles: extractStyles(styleData),
+		return &components.Box{
+			ID:       "wrap-" + base.GetID(),
+			Children: []components.Component{base},
+			Styles:   extractStyles(styleData),
 		}
 	}
 
@@ -145,15 +180,9 @@ func validate(cfg *components.Config) error {
 }
 
 func validateComponent(c components.Component) error {
+	// Logic to ensure components that need IDs have them
 	if c.GetID() == "" && c.GetType() != "box" {
 		return fmt.Errorf("component of type '%s' is missing a required ID", c.GetType())
-	}
-
-	// Type assertion to check Box children
-	if box, ok := c.(*components.Box); ok {
-		if box.Child == nil {
-			return fmt.Errorf("box component contains no child")
-		}
 	}
 	return nil
 }

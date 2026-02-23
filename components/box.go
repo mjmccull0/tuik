@@ -2,46 +2,52 @@ package components
 
 import (
 	"github.com/charmbracelet/lipgloss"
-	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/bubbletea"
 )
 
 type Box struct {
-	Styles StyleConfig
-	Child  Component
+	ID       string
+	Children []Component
+	Vertical bool
+	Styles   StyleConfig // Ensure this matches the field the parser uses
 }
 
-func (b Box) Render(ctx RenderContext) string {
-	content := b.Child.Render(ctx)
-	style := lipgloss.NewStyle()
-
-	if b.Styles.Padding > 0 { style = style.Padding(b.Styles.Padding) }
-	if b.Styles.Margin > 0 { style = style.Margin(b.Styles.Margin) }
-	if b.Styles.BackgroundColor != "" { style = style.Background(lipgloss.Color(b.Styles.BackgroundColor)) }
-	if b.Styles.Border {
-		style = style.Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color(b.Styles.BorderColor))
+func (b Box) Render(ctx Context) string {
+	var views []string
+	for _, child := range b.Children {
+		// Passing the bucket down
+		views = append(views, child.Render(ctx))
 	}
-	return style.Render(content)
+
+	if b.Vertical {
+		return lipgloss.JoinVertical(lipgloss.Left, views...)
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, views...)
 }
 
-func (b Box) Update(msg tea.Msg) (Component, tea.Cmd) {
-	newChild, cmd := b.Child.Update(msg)
-	return Box{Styles: b.Styles, Child: newChild}, cmd
+func (b *Box) Update(msg tea.Msg, ctx Context) (Component, tea.Cmd) {
+	var cmds []tea.Cmd
+	for i, child := range b.Children {
+		newComp, cmd := child.Update(msg, ctx)
+		b.Children[i] = newComp
+		cmds = append(cmds, cmd)
+	}
+	return b, tea.Batch(cmds...)
 }
 
-func (b Box) Focus() {
-	if b.Child != nil {
-		b.Child.Focus()
+func (b Box) Blur()             {}
+func (b *Box) Focus() {
+	for _, child := range b.Children {
+		if child.IsFocusable() {
+			child.Focus()
+			// We usually only focus the first focusable element 
+			// in a container by default.
+			break 
+		}
 	}
 }
-
-func (b Box) Blur() {
-	if b.Child != nil {
-		b.Child.Blur()
-	}
-}
-
-func (b Box) IsFocusable() bool { return b.Child.IsFocusable() }
-func (b Box) GetType() string   { return b.Child.GetType() }
-func (b Box) GetID() string     { return b.Child.GetID() }
-func (b Box) GetValue() string  { return b.Child.GetValue() }
-func (b Box) GetAction() string { return b.Child.GetAction() }
+func (b Box) GetAction() string { return "" }
+func (b Box) GetID() string     { return b.ID }
+func (b Box) GetType() string { return "box" }
+func (b Box) GetValue() string { return "" }
+func (b Box) IsFocusable() bool { return false }

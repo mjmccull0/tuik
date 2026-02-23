@@ -7,37 +7,47 @@ import (
 
 
 func TestNavigatorFlow(t *testing.T) {
-  reg := map[string]*components.View{
-    "home":   {ID: "home"},
-    "commit": {ID: "commit"},
-  }
-  nav := &Navigator{Registry: reg, ActiveView: "home"}
+    // 1. Update map to use pointers if that's what Navigator expects
+    reg := map[string]components.View{
+        "home":   {ID: "home"},
+        "commit": {ID: "commit"},
+    }
 
-  // Test 1: Navigation Swap
-  res := nav.ProcessAction("commit", nil)
-  if res.NextView != "commit" {
-    t.Errorf("Expected to move to 'commit' view, got %s", res.NextView)
-  }
+    nav := Navigator{
+        Views:        reg,
+        ActiveViewID: "home",
+        Context:      components.Context{Data: make(map[string]string)}, // Ensure Context is init
+    }
 
-  // Test 2: Interpolated Command
-  data := map[string]string{"msg": "fix-bugs"}
-  res = nav.ProcessAction("git commit -m {{.msg}}", data)
-  if res.Command != "git commit -m fix-bugs" {
-    t.Errorf("Interpolation failed, got: %s", res.Command)
-  }
+    // Test 1: Navigation Swap
+    // Note: If ProcessAction returns ActionResult, check the field names
+    res := nav.ProcessAction("commit", nil)
+    if nav.ActiveViewID != "commit" {
+        t.Errorf("Expected ActiveViewID to be 'commit', got %s", nav.ActiveViewID)
+    }
+
+    // Test 2: Interpolated Command
+    data := map[string]string{"msg": "fix-bugs"}
+    res = nav.ProcessAction("git commit -m {{.msg}}", data)
+    if res.Command != "git commit -m fix-bugs" {
+        t.Errorf("Interpolation failed, got: %s", res.Command)
+    }
 }
 
 func TestNavigatorViewSwapState(t *testing.T) {
-	reg := map[string]*components.View{
+	reg := map[string]components.View{
 		"home": {ID: "home"},
 		"next": {ID: "next"},
 	}
-	nav := &Navigator{Registry: reg, ActiveView: "home"}
+	nav := Navigator{
+		Views:   reg,
+		ActiveViewID: "main",
+	}
 
 	res := nav.ProcessAction("next", nil)
 
-	if nav.ActiveView != "next" {
-		t.Errorf("Navigator internal state didn't update. Expected 'next', got %s", nav.ActiveView)
+	if nav.ActiveViewID != "next" {
+		t.Errorf("Navigator internal state didn't update. Expected 'next', got %s", nav.ActiveViewID)
 	}
     
     if !res.IsUpdate {

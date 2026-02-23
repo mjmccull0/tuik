@@ -1,7 +1,6 @@
 package components
 
 import (
-	"github.com/charmbracelet/lipgloss"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -11,17 +10,14 @@ type Text struct {
 	Bold    bool   // Inline style
 }
 
-func (t Text) Render(ctx RenderContext) string {
-	style := lipgloss.NewStyle()
-	if t.Color != "" { style = style.Foreground(lipgloss.Color(t.Color)) }
-	if t.Bold { style = style.Bold(true) }
-	
-	return style.Render(t.Content)
+func (t Text) Render(ctx Context) string {
+	content := ctx.Resolve(t.Content)
+	return content
 }
 
 func (t Text) Blur() {}
 func (t Text) Focus() {}
-func (t Text) Update(msg tea.Msg) (Component, tea.Cmd) { return t, nil }
+func (t Text) Update(msg tea.Msg, ctx Context) (Component, tea.Cmd) { return t, nil }
 func (t Text) IsFocusable() bool { return false }
 func (t Text) GetType() string   { return "text" }
 func (t Text) GetID() string     { return "" }

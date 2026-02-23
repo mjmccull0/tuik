@@ -14,7 +14,7 @@ func TestTextInputUpdateSync(t *testing.T) {
 	ti.Model.SetValue("hi")
 	
 	// We pass nil msg because we're testing the manual sync in our Update
-	ti.Update(nil)
+	ti.Update(nil, Context{})
 
 	if ti.Content != "hi" {
 		t.Errorf("Expected Content to be 'hi' after sync, got '%s'", ti.Content)

@@ -14,14 +14,8 @@ type TextInput struct {
 	Model       textinput.Model
 }
 
-func (t TextInput) Render(ctx RenderContext) string {
+func (t TextInput) Render(ctx Context) string {
 	style := lipgloss.NewStyle().PaddingLeft(1).Width(30)
-	
-	if ctx.IsFocused {
-		return style.Border(lipgloss.NormalBorder()).
-			BorderForeground(lipgloss.Color("63")).
-			Render(t.Model.View()) 
-	}
 	
 	return style.Border(lipgloss.HiddenBorder()).
 		Underline(true).
@@ -29,7 +23,7 @@ func (t TextInput) Render(ctx RenderContext) string {
 		Render(t.Model.View())
 }
 
-func (t *TextInput) Update(msg tea.Msg) (Component, tea.Cmd) {
+func (t *TextInput) Update(msg tea.Msg, ctx Context) (Component, tea.Cmd) {
 	// if k, ok := msg.(tea.KeyMsg); ok {
   //       fmt.Printf("Input received key: %s\n", k.String())
 	// }
