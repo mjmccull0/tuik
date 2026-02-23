@@ -1,46 +1,64 @@
 package components
 
 import (
-  "github.com/charmbracelet/lipgloss"
-  tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 type Button struct {
-  ID      string
-  Text    string
-  Action  string // The View ID or Shell Command to trigger
-  focused bool
+	ID      string
+	Text    string
+	Action  string 
+	focused bool
+	Styles  StyleConfig
 }
 
-func (b Button) Render(ctx Context) string {
-  // Standard style
-  btnStyle := lipgloss.NewStyle().
-    Padding(0, 3).
-    MarginTop(1).
-    Border(lipgloss.RoundedBorder())
+func (b *Button) Render(ctx Context) string {
+	text := ctx.Resolve(b.Text)
+	
+	// Start with the styles defined in JSON (margins, width, etc.)
+	style := b.Styles.ToLipgloss().Padding(0, 2)
 
-  // If focused, give it a distinct color (Purple/5)
-  if b.focused {
-    btnStyle = btnStyle.
-      BorderForeground(lipgloss.Color("5")).
-      Foreground(lipgloss.Color("5")).
-      Bold(true)
-  }
+	if b.focused {
+		// Apply Focus styling
+		style = style.
+			Border(lipgloss.ThickBorder()).
+			BorderForeground(lipgloss.Color("205")).
+			Foreground(lipgloss.Color("205")).
+			Bold(true)
+		
+		return style.Render("󰄾 " + text)
+	}
 
-  return btnStyle.Render(ctx.Resolve(b.Text))
+	// Apply Normal styling
+	style = style.
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("240"))
+
+	return style.Render("  " + text)
 }
 
 func (b *Button) Update(msg tea.Msg, ctx Context) (Component, tea.Cmd) {
-  // Buttons usually don't have internal state changes on keys, 
-  // they just wait for 'enter' which is handled by main.go
-  return b, nil
+	if !b.focused {
+		return b, nil
+	}
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		if msg.String() == "enter" {
+			return b, func() tea.Msg {
+				return ActionMsg{ID: b.ID, Action: b.Action}
+			}
+		}
+	}
+	return b, nil
 }
 
-func (b *Button) Focus() { b.focused = true }
-func (b *Button) Blur()  { b.focused = false }
-func (b *Button) IsFocused() bool { return b.focused }
-func (b Button) IsFocusable() bool { return true }
-func (b Button) GetID() string     { return b.ID }
-func (b Button) GetAction() string { return b.Action }
-func (b Button) GetValue() string  { return "" }
-func (b Button) GetType() string   { return "button" }
+func (b *Button) Focus()           { b.focused = true }
+func (b *Button) Blur()            { b.focused = false }
+func (b *Button) IsFocused() bool  { return b.focused }
+func (b *Button) IsFocusable() bool { return true }
+func (b *Button) GetID() string     { return b.ID }
+func (b *Button) GetAction() string { return b.Action }
+func (b *Button) GetValue() string  { return "" }
+func (b *Button) GetType() string   { return "button" }

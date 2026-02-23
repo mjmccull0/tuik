@@ -34,7 +34,7 @@ func (l List) Render(ctx Context) string {
 func (l List) resolveItems(ctx Context) []ListItem {
 	// Case 1: Dynamic Shell Command
 	if cmdStr, ok := l.Input.(string); ok {
-		// utils.Log("Executing shell command: %s", cmdStr)
+		utils.Log("Executing shell command: %s", cmdStr)
 
 		out, err := exec.Command("sh", "-c", cmdStr).CombinedOutput()
 		if err != nil {

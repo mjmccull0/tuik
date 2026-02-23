@@ -2,18 +2,17 @@ package parser
 
 import (
 	"encoding/json"
-	"fmt"
 	"tuik/components"
 
 	"github.com/charmbracelet/bubbles/textinput"
 )
 
-// ParseConfig converts the raw JSON bytes into a structured component registry.
 func ParseConfig(data []byte) (components.Config, error) {
 	var raw struct {
 		Main  string `json:"main"`
 		Views map[string]struct {
-			Style    map[string]interface{}   `json:"style"`
+			Context  map[string]string      `json:"context"`
+			Style    map[string]interface{} `json:"style"`
 			Children []map[string]interface{} `json:"children"`
 		} `json:"views"`
 	}
@@ -28,7 +27,14 @@ func ParseConfig(data []byte) (components.Config, error) {
 	}
 
 	for viewID, viewData := range raw.Views {
-		v := &components.View{ID: viewID}
+		v := &components.View{
+			ID:      viewID,
+			Context: make(map[string]any),
+		}
+
+		for k, val := range viewData.Context {
+			v.Context[k] = val
+		}
 
 		for _, childData := range viewData.Children {
 			comp := ParseComponent(childData)
@@ -44,7 +50,6 @@ func ParseConfig(data []byte) (components.Config, error) {
 
 func ParseComponent(data map[string]interface{}) components.Component {
 	typ, _ := data["type"].(string)
-
 	if typ == "" {
 		if _, hasText := data["text"]; hasText {
 			typ = "text"
@@ -59,7 +64,7 @@ func ParseComponent(data map[string]interface{}) components.Component {
 		if content == "" {
 			content, _ = data["text"].(string)
 		}
-		base = components.Text{Content: content}
+		base = &components.Text{Content: content}
 
 	case "text-input":
 		id, _ := data["id"].(string)
@@ -90,7 +95,7 @@ func ParseComponent(data map[string]interface{}) components.Component {
 		if inputData == nil {
 			inputData = items
 		}
-		base = components.List{ID: id, Input: inputData, OnSelect: onSelect}
+		base = &components.List{ID: id, Input: inputData, OnSelect: onSelect}
 
 	case "box":
 		id, _ := data["id"].(string)
@@ -105,12 +110,16 @@ func ParseComponent(data map[string]interface{}) components.Component {
 				}
 			}
 		}
-		// FIX: Return the pointer directly here
-		base = &components.Box{
+		// Boxes can handle their own styles now
+		box := &components.Box{
 			ID:       id,
 			Children: children,
 			Vertical: vertical,
 		}
+		if styleData, ok := data["style"].(map[string]interface{}); ok {
+			box.Styles = extractStyles(styleData)
+		}
+		base = box
 
 	case "button":
 		text, _ := data["text"].(string)
@@ -119,34 +128,31 @@ func ParseComponent(data map[string]interface{}) components.Component {
 			action, _ = data["on-press"].(string)
 		}
 		id, _ := data["id"].(string)
-		base = &components.Button{
+		btn := &components.Button{
 			ID:     id,
 			Text:   text,
 			Action: action,
 		}
+		// Attach style directly to button instead of creating a wrapper box
+		if styleData, ok := data["style"].(map[string]interface{}); ok {
+			btn.Styles = extractStyles(styleData)
+		}
+		base = btn
 
 	default:
 		return nil
 	}
 
-	// FIX: Style Wrapping - must return &components.Box
-	if styleData, ok := data["style"].(map[string]interface{}); ok {
-		return &components.Box{
-			ID:       "wrap-" + base.GetID(),
-			Children: []components.Component{base},
-			Styles:   extractStyles(styleData),
-		}
-	}
-
 	return base
 }
 
-// extractStyles maps a JSON map to the internal StyleConfig struct.
 func extractStyles(s map[string]interface{}) components.StyleConfig {
 	styles := components.StyleConfig{}
 
 	if val, ok := s["padding"].(float64); ok {
-		styles.Padding = int(val)
+		// Map simple padding to all sides
+		p := int(val)
+		styles.PaddingTop, styles.PaddingRight, styles.PaddingBottom, styles.PaddingLeft = p, p, p, p
 	}
 	if val, ok := s["margin-top"].(float64); ok {
 		styles.MarginTop = int(val)
@@ -162,27 +168,4 @@ func extractStyles(s map[string]interface{}) components.StyleConfig {
 	}
 
 	return styles
-}
-
-func validate(cfg *components.Config) error {
-	if _, ok := cfg.Views[cfg.Main]; !ok {
-		return fmt.Errorf("main view '%s' is not defined in views", cfg.Main)
-	}
-
-	for viewID, view := range cfg.Views {
-		for _, child := range view.Children {
-			if err := validateComponent(child); err != nil {
-				return fmt.Errorf("view '%s': %w", viewID, err)
-			}
-		}
-	}
-	return nil
-}
-
-func validateComponent(c components.Component) error {
-	// Logic to ensure components that need IDs have them
-	if c.GetID() == "" && c.GetType() != "box" {
-		return fmt.Errorf("component of type '%s' is missing a required ID", c.GetType())
-	}
-	return nil
 }

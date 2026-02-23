@@ -8,6 +8,7 @@ type Text struct {
 	Content string
 	Color   string // Inline style
 	Bold    bool   // Inline style
+	Style   StyleConfig
 }
 
 func (t Text) Render(ctx Context) string {

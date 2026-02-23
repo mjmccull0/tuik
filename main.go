@@ -2,6 +2,7 @@ package main
 
 import (
   "fmt"
+	"log"
   "os"
   "os/exec"
   "strings"
@@ -19,6 +20,31 @@ type model struct {
   navigator *Navigator
 	width     int
 	height    int
+	logger    *log.Logger
+}
+
+// getContextData gathers all current component values into a map for the navigator
+func (m model) getContextData() map[string]string {
+    data := make(map[string]string)
+    // You likely have a loop here that visits every component 
+    // and calls GetValue(), similar to your existing sync logic.
+    return data
+}
+
+// executeShellCommand runs the resolved string (e.g., "git commit...") in the terminal
+func (m model) executeShellCommand(command string) tea.Cmd {
+    return func() tea.Msg {
+        // Using exec.Command to actually run the git logic
+        cmd := exec.Command("sh", "-c", command)
+        output, err := cmd.CombinedOutput()
+        
+        if err != nil {
+            m.logger.Printf("Shell Error: %v, Output: %s", err, string(output))
+        } else {
+            m.logger.Printf("Shell Success: %s", string(output))
+        }
+        return nil // Or a 'SuccessMsg' if you want to show a toast
+    }
 }
 
 func (m *model) syncContext() {
@@ -120,6 +146,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		return m, nil // Don't propagate resize to children yet
+
+	case components.ActionMsg:
+		// 1. Log the action for debugging
+		m.logger.Printf("Action Triggered: %s (ID: %s)", msg.Action, msg.ID)
+		
+		// 2. Pass it to the navigator to handle view switching or commands
+		res := m.navigator.ProcessAction(msg.Action, m.getContextData())
+		
+		if res.Command != "" {
+			// This is where you'd run the actual shell command (e.g., git commit)
+			return m, m.executeShellCommand(res.Command)
+		}
+		return m, nil
 
 	case tea.KeyMsg:
 		switch msg.String() {
