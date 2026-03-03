@@ -48,30 +48,43 @@ type shellOutputMsg string
 
 func (m model) executeShellCommand(cmdStr string) tea.Cmd {
     return func() tea.Msg {
-        cmd := exec.Command("sh", "-c", cmdStr)
-        output, _ := cmd.CombinedOutput()
+        // Use the navigator's wrapped execution instead of raw exec.Command
+        output, err := m.navigator.execWrapped(cmdStr)
         
-        if m.logger != nil {
-            m.logger.Printf("Command Run: %s", cmdStr)
+        if err != nil && m.logger != nil {
+             m.logger.Printf("Shell Error: %v", err)
         }
 
-        // Return the output so Update() can catch it
+        if m.logger != nil {
+            m.logger.Printf("Command Run (Wrapped): %s", cmdStr)
+        }
+
         return shellOutputMsg(string(output))
     }
 }
 
+// prepareCmd returns the *exec.Cmd without running it, useful for tea.ExecProcess
+func (n *Navigator) prepareCmd(cmdStr string) *exec.Cmd {
+	resolved := n.Context.Resolve(cmdStr)
+	finalCmd := resolved
+	if n.Config.ShellFunctions != "" {
+		finalCmd = fmt.Sprintf("source %s; %s", n.Config.ShellFunctions, resolved)
+	}
+	return exec.Command("zsh", "-c", finalCmd)
+}
+
 // executeForegroundCommand suspends the TUI to run an interactive process
 func (m model) executeForegroundCommand(cmdStr string) tea.Cmd {
-	// We use tea.ExecProcess to handle the terminal hand-off
-	// It takes an *exec.Cmd and a function to return a msg when finished
-	c := exec.Command("sh", "-c", cmdStr)
+	clearedCmd := fmt.Sprintf("tput smcup; clear; %s; tput rmcup", cmdStr)
+
+	// Use our new prepareCmd to get the zsh + source wrapper
+	c := m.navigator.prepareCmd(clearedCmd)
+	
 	return tea.ExecProcess(c, func(err error) tea.Msg {
-		if err != nil {
-			if m.logger != nil {
-				m.logger.Printf("Foreground Error: %v", err)
-			}
+		if err != nil && m.logger != nil {
+			m.logger.Printf("Foreground Error: %v", err)
 		}
-		return nil // Return to the TUI normally
+		return nil 
 	})
 }
 
@@ -140,6 +153,7 @@ func initialModel(cfg components.Config) model {
 	nav := &Navigator{
 		Views:        viewMap,
 		ActiveViewID: cfg.Main,
+		Config:       Config{Main: cfg.Main, ShellFunctions: cfg.ShellFunctions},
 		Context: components.Context{
 			Data:   make(map[string]string),
 			Styles: make(map[string]lipgloss.Style),
@@ -326,7 +340,7 @@ func main() {
     m := initialModel(cfg)
     m.logger = logger 
 
-    p := tea.NewProgram(m)
+    p := tea.NewProgram(m, tea.WithAltScreen())
     if _, err := p.Run(); err != nil {
         fmt.Printf("Runtime error: %v\n", err)
         os.Exit(1)

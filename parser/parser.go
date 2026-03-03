@@ -3,6 +3,7 @@ package parser
 import (
 	"encoding/json"
 	"tuik/components"
+	"tuik/utils"
 
 	"github.com/charmbracelet/bubbles/textinput"
 )
@@ -22,8 +23,10 @@ func parseStaticItems(raw []interface{}) []components.ListItem {
 
 func ParseConfig(data []byte) (components.Config, error) {
 	var raw struct {
-		Main  string `json:"main"`
-		Views map[string]struct {
+		Main        string `json:"main"`
+		// Add the JSON tag here to match your tuik.json key
+		ShellFunctions string `json:"setup_script"` 
+		Views       map[string]struct {
 			Context  map[string]string      `json:"context"`
 			Style    map[string]interface{} `json:"style"`
 			Children []map[string]interface{} `json:"children"`
@@ -34,9 +37,12 @@ func ParseConfig(data []byte) (components.Config, error) {
 		return components.Config{}, err
 	}
 
+	// Create the final config and ensure the path is expanded
 	config := components.Config{
-		Main:  raw.Main,
-		Views: make(map[string]*components.View),
+		Main:        raw.Main,
+		// This uses the helper we discussed to turn ~/ into /Users/name/
+		ShellFunctions: utils.ExpandPath(raw.ShellFunctions), 
+		Views:       make(map[string]*components.View),
 	}
 
 	for viewID, viewData := range raw.Views {

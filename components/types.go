@@ -70,8 +70,9 @@ type View struct {
 }
 
 type Config struct {
-	Main  string           `json:"main"`
-	Views map[string]*View `json:"views"`
+	Main        string           `json:"main"`
+	Views       map[string]*View `json:"views"`
+	ShellFunctions string
 }
 
 type StyleConfig struct {

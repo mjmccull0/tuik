@@ -1,0 +1,22 @@
+{
+  "main": "file-manager",
+  "views": {
+    "file-manager": {
+      "style": { "padding": 1 },
+      "children": [
+        {
+          "type": "list",
+          "id": "selected_file",
+          "input": "git status --porcelain | awk '{print $2}'",
+          "on-select": "inspect-file"
+        }
+      ]
+    },
+    "inspect-file": {
+      "children": [
+        { "text": "Viewing: {{.selected_file}}", "style": { "bold": true } },
+        { "type": "button", "text": "Back to List", "on-press": "file-manager" }
+      ]
+    }
+  }
+}
