@@ -9,59 +9,7 @@
           "type": "list",
           "input": [
             { "text": "Project Menu", "on-press": "shell:project" },
-            { "text": "󰊢 Branch Undo", "on-press": "shell:project_undo_wizard" },
-            { "text": "󰊢 Git Commit Wizard WIP", "on-press": "commit-wizard" },
-            { "text": "󰊢 Git Operations", "on-press": "git-ops" },
-            { "text": "󰄬 Quick Status", "on-press": "git status" }
-          ]
-        }
-      ]
-    },
-    "commit-wizard": {
-      "style": { "padding": 1, "background-color": "#1a1a1a" },
-      "flow": [
-        {
-          "id": "step1",
-          "children": [
-            {
-              "type": "list",
-              "id": "type",
-              "input": [
-                { "text": "fix" },
-                { "text": "feat" },
-                { "text": "docs" },
-                { "text": "style" },
-                { "text": "refactor" },
-                { "text": "chore" }
-              ],
-              "on-select": "{{set-context .type}}"
-            }
-          ]
-        },
-        {
-          "id": "step2",
-          "children": [{ "type": "text-input", "id": "msg" }]
-        }
-      ],
-      "on-complete": "git commit -m '{{.type}}: {{.msg}}'"
-    },
-    "git-ops": {
-      "style": { "padding": 1, "background-color": "#1a1a1a" },
-      "children": [
-        { "text": "NEW COMMIT", "style": { "bold": true, "color": "#ff5555" } },
-        { 
-          "type": "text-input", 
-          "id": "commit_msg", 
-          "style": { "margin-top": 1, "margin-bottom": 1 } 
-        },
-        {
-          "type": "list",
-          "items": [
-            { 
-              "text": "🚀 Execute Commit", 
-              "on-press": "git commit -m '{{.commit_msg}}'" 
-            },
-            { "text": "󰩈 Cancel", "on-press": "dashboard" }
+            { "text": "󰊢 Branch Undo", "on-press": "shell:project_undo_wizard" }
           ]
         }
       ]

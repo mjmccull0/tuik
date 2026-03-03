@@ -9,9 +9,9 @@
           "type": "list",
           "input": [
             { "text": "Project Menu", "on-press": "shell:project" },
-            { "text": "Branch", "on-press": "shell:project_branch_menu" },
-            { "text": "󰊢 Git Commit Wizard", "on-press": "commit-wizard" },
-            { "text": "󰊢 Git Operations", "on-press": "git-ops" },
+            { "text": "󰊢 Branch Undo", "on-press": "shell:project_undo_wizard" },
+            { "text": "󰊢 Git Commit Wizard WIP", "on-press": "view:commit-wizard" },
+            { "text": "󰊢 Git Operations", "on-press": "view:git-ops" },
             { "text": "󰄬 Quick Status", "on-press": "git status" }
           ]
         }
