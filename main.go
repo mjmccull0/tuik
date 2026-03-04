@@ -24,6 +24,7 @@ type model struct {
 	lastOutput string
 }
 
+type RefreshMsg struct{}
 
 func (m model) resolveString(input string) string {
     // Create a temporary Context object to use its Resolve method
@@ -75,7 +76,7 @@ func (n *Navigator) prepareCmd(cmdStr string) *exec.Cmd {
 
 // executeForegroundCommand suspends the TUI to run an interactive process
 func (m model) executeForegroundCommand(cmdStr string) tea.Cmd {
-	clearedCmd := fmt.Sprintf("tput smcup; clear; %s; tput rmcup", cmdStr)
+	clearedCmd := fmt.Sprintf("clear -x; tput smcup; clear; { %s; }; tput rmcup", cmdStr)
 
 	// Use our new prepareCmd to get the zsh + source wrapper
 	c := m.navigator.prepareCmd(clearedCmd)
@@ -84,7 +85,7 @@ func (m model) executeForegroundCommand(cmdStr string) tea.Cmd {
 		if err != nil && m.logger != nil {
 			m.logger.Printf("Foreground Error: %v", err)
 		}
-		return nil 
+		return RefreshMsg{}
 	})
 }
 
@@ -178,7 +179,14 @@ func initialModel(cfg components.Config) model {
 }
 
 func (m model) Init() tea.Cmd {
-  return textinput.Blink 
+    // 1. Get the hydration command for the initial view
+    _, hydrationCmd := m.navigator.InitView(m.navigator.ActiveViewID)
+
+    // 2. Combine it with the text input blinker
+    return tea.Batch(
+        textinput.Blink, 
+        hydrationCmd,
+    )
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -187,6 +195,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
         m.width, m.height = msg.Width, msg.Height
         return m, nil
 
+	  case RefreshMsg:
+		  _, cmd := m.navigator.InitView(m.navigator.ActiveViewID)
+	    return m, cmd
 		case shellOutputMsg:
 			// Store it in the model so View() can see it
 			m.lastOutput = string(msg)

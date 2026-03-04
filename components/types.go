@@ -106,6 +106,12 @@ type ListItem struct {
 	OnPress  string `json:"on-press,omitempty"`
 }
 
+
+type ListHydrationMsg struct {
+	ID    string
+	Items []ListItem
+}
+
 // Ensure View is a pointer in the navigator map
 // type Navigator struct { Views map[string]*View ... }
 func (v *View) Update(msg tea.Msg, ctx Context) (Component, tea.Cmd) {

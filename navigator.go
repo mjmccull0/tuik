@@ -5,6 +5,7 @@ import (
   "strings"
 	"os/exec"
   "tuik/components"
+  tea "github.com/charmbracelet/bubbletea"
 )
 
 type Config struct {
@@ -79,4 +80,82 @@ func (n *Navigator) GetActiveView() (*components.View, components.Context) {
 	}
 
 	return view, n.Context
+}
+
+func (n *Navigator) Refresh() tea.Cmd {
+	return func() tea.Msg {
+		return RefreshMsg{}
+	}
+}
+
+func (n *Navigator) InitView(viewID string) (*components.View, tea.Cmd) {
+	view, ok := n.Views[viewID]
+	if !ok {
+		return nil, nil
+	}
+
+	n.ActiveViewID = viewID
+	var cmds []tea.Cmd
+
+	for i := range view.Children {
+		// child is a components.Component (Interface)
+		child := view.Children[i]
+
+		// Use a type switch to access specific fields
+		switch c := child.(type) {
+		case *components.List: // Assuming your struct name
+			// Assert that Input is a string before checking if it's a shell command
+			if inputStr, ok := c.Input.(string); ok && inputStr != "" {
+					if n.isShellCommand(inputStr) {
+							cmds = append(cmds, n.runListHydration(c))
+					}
+			}
+		}
+	}
+
+	return view, tea.Batch(cmds...)
+}
+
+func (n *Navigator) runListHydration(l *components.List) tea.Cmd {
+    return func() tea.Msg {
+        // Assert Input is a string here as well
+        if inputStr, ok := l.Input.(string); ok {
+            return components.ListHydrationMsg{
+                ID:    l.ID,
+                Items: n.executeShellAndParse(inputStr),
+            }
+        }
+        return nil
+    }
+}
+
+// This might warrant a json config option
+func (n *Navigator) isShellCommand(input string) bool {
+	// Simple heuristic: if it contains a space or starts with a known tool
+	keywords := []string{"git", "project", "ls", "./", "get_"}
+	for _, k := range keywords {
+		if strings.HasPrefix(input, k) {
+			return true
+		}
+	}
+	return strings.Contains(input, " ")
+}
+
+func (n *Navigator) executeShellAndParse(cmdStr string) []components.ListItem {
+	// Use your existing prepareCmd which handles the zsh + source setup
+	c := n.prepareCmd(cmdStr)
+	out, err := c.CombinedOutput()
+	if err != nil {
+		return []components.ListItem{{Text: "Error running command"}}
+	}
+
+	lines := strings.Split(string(out), "\n")
+	var items []components.ListItem
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" {
+			items = append(items, components.ListItem{Text: trimmed})
+		}
+	}
+	return items
 }

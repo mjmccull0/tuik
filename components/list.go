@@ -2,9 +2,7 @@ package components
 
 import (
 	"strings"
-	"os/exec"
 	tea "github.com/charmbracelet/bubbletea"
-	"tuik/utils"
 )
 
 // Ensure List implements Component
@@ -32,53 +30,33 @@ func (l List) Render(ctx Context) string {
 }
 
 func (l List) resolveItems(ctx Context) []ListItem {
-	// Case 1: Dynamic Shell Command
-	if cmdStr, ok := l.Input.(string); ok {
-		utils.Log("Executing shell command: %s", cmdStr)
+    if items, ok := l.Input.([]ListItem); ok {
+        return items
+    }
 
-		out, err := exec.Command("sh", "-c", cmdStr).CombinedOutput()
-		if err != nil {
-			utils.Log("SHELL ERROR: %v | Output: %s", err, string(out))
-			return []ListItem{{Text: "Error: " + err.Error()}}
-		}
+    if _, ok := l.Input.(string); ok {
+        // This gives the user immediate feedback that work is happening
+        return []ListItem{{Text: "Loading..."}} 
+    }
 
-		outputStr := string(out)
-		// utils.Log("SHELL SUCCESS: Output: %s", outputStr)
-
-		// --- THE MISSING LOGIC START ---
-		lines := strings.Split(strings.TrimSpace(outputStr), "\n")
-		var items []ListItem
-		for _, line := range lines {
-			if strings.TrimSpace(line) != "" {
-				items = append(items, ListItem{Text: strings.TrimSpace(line)})
-			}
-		}
-		return items
-		// --- THE MISSING LOGIC END ---
-	}
-
-	// Case 2: Static ListItems (already parsed from JSON)
-	if items, ok := l.Input.([]ListItem); ok {
-		return items
-	}
-
-	// Case 3: Simple string slice
-	if strs, ok := l.Input.([]string); ok {
-		items := make([]ListItem, len(strs))
-		for i, s := range strs {
-			items[i] = ListItem{Text: s}
-		}
-		return items
-	}
-
-	return []ListItem{}
+    return []ListItem{}
 }
 
 func (l *List) Update(msg tea.Msg, ctx Context) (Component, tea.Cmd) {
-    // 1. UNPACK AND VALIDATE (The code goes here)
-    items, ok := l.Input.([]ListItem)
-    if !ok || len(items) == 0 {
-        return l, nil // Stop early if there's no data to act on
+	  switch msg := msg.(type) {
+				case ListHydrationMsg:
+				// Only update if this message is meant for THIS list
+				if msg.ID == l.ID {
+					l.Input = msg.Items
+					// Reset cursor to the top since the list content changed
+					l.Cursor = 0 
+					return l, nil
+				}
+	  }
+		// 2. Resolve items for the current render/interaction cycle
+    items := l.resolveItems(ctx)
+    if len(items) == 0 {
+        return l, nil 
     }
 
     // Ensure the cursor hasn't drifted out of bounds
