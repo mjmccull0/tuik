@@ -1,0 +1,51 @@
+{
+  "main": "start",
+  "styles": {
+    "primary": "212",
+    "muted": "240",
+    "accent": "86",
+    "bg": "0"
+  },
+  "views": {
+    "start": {
+      "component": "gum",
+      "args": ["input", "--placeholder", "Enter search term..."],
+      "env": {
+        "GUM_INPUT_PROMPT": " ",
+        "GUM_INPUT_PROMPT_FOREGROUND": "{{.styles.primary}}",
+        "GUM_INPUT_CURSOR_FOREGROUND": "{{.styles.primary}}",
+        "GUM_INPUT_HEADER": "FILE SEARCH ENGINE",
+        "GUM_INPUT_HEADER_FOREGROUND": "{{.styles.muted}}",
+        "GUM_INPUT_WIDTH": "50"
+      },
+      "on_success": "view:pick_file"
+    },
+    "pick_file": {
+      "component": "gum",
+      "args": ["file", "."],
+      "env": {
+        "GUM_FILE_CURSOR_FOREGROUND": "{{.styles.primary}}",
+        "GUM_FILE_HEADER": "SELECT A FILE TO OPEN",
+        "GUM_FILE_HEADER_FOREGROUND": "{{.styles.accent}}",
+        "GUM_FILE_SELECTED_FOREGROUND": "{{.styles.primary}}"
+      },
+      "on_success": "view:confirm_action"
+    },
+    "confirm_action": {
+      "component": "gum",
+      "args": ["confirm", "Do you want to edit {{.last_output}}?"],
+      "env": {
+        "GUM_CONFIRM_PROMPT_FOREGROUND": "{{.styles.accent}}",
+        "GUM_CONFIRM_SELECTED_BACKGROUND": "{{.styles.primary}}",
+        "GUM_CONFIRM_SELECTED_FOREGROUND": "{{.styles.bg}}",
+        "GUM_CONFIRM_UNSELECTED_FOREGROUND": "{{.styles.muted}}"
+      },
+      "on_success": "view:edit_file"
+    },
+    "edit_file": {
+      "component": "/snap/bin/nvim",
+      "args": ["{{.last_output}}"],
+      "on_success": "exit"
+    }
+  }
+}
