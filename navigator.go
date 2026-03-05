@@ -6,7 +6,13 @@ import (
 	"os/exec"
   "tuik/components"
   tea "github.com/charmbracelet/bubbletea"
+	"tuik/utils"
 )
+
+type ActionResult struct {
+	Command    string
+	NextViewID string
+}
 
 type Config struct {
   Main    string
@@ -41,20 +47,37 @@ func (n *Navigator) execWrapped(cmd string) ([]byte, error) {
 	return exec.Command("zsh", "-c", finalCmd).Output()
 }
 
-func (n *Navigator) ProcessAction(action string, data map[string]string) NavResult {
-	// We check n.Views (our Registry) and update n.ActiveViewID
-  if strings.HasPrefix(action, "view:") {
-		target := strings.TrimPrefix(action, "view:")
-		n.ActiveViewID = target
-		return NavResult{NextViewID: target, IsUpdate: true}
-	}
+func (n *Navigator) ProcessAction(action string) ActionResult {
+	  utils.Log("NAV PROCESS: Input Action Raw = '%s'", action)
 
-	// 3. Otherwise, it's a shell command (git commit, etc.)
-	return NavResult{Command: action}
+    // Resolve variables (this replaces {{.id}} with actual values)
+    finalAction := n.Context.ReplacePlaceholders(action)
+
+	  utils.Log("NAV PROCESS: Interpolated = '%s'", finalAction)
+
+	  var res ActionResult = ActionResult{Command: finalAction}
+    // Handle Shell actions (Strip the prefix so prepareCmd gets a clean string)
+    if strings.HasPrefix(finalAction, "shell:") {
+        res = ActionResult{Command: strings.TrimPrefix(finalAction, "shell:")}
+    }
+
+    // Handle View changes
+    if strings.HasPrefix(finalAction, "view:") {
+        res = ActionResult{NextViewID: strings.TrimPrefix(finalAction, "view:")}
+    }
+
+  	utils.Log("NAV RESULT: Cmd='%s' View='%s'", res.Command, res.NextViewID)
+    // Fallback for old configs: treat raw strings as commands
+    // This restores the behavior your old tuik.json files rely on
+    return res
 }
 
 func (n *Navigator) GetActiveView() (*components.View, components.Context) {
-	view := n.Views[n.ActiveViewID]
+	view, ok := n.Views[n.ActiveViewID]
+	if !ok {
+		  // Return an empty view instead of crashing
+		  return &components.View{}, n.Context
+	}
 	
 	for i, child := range view.Children {
 		if l, ok := child.(*components.List); ok {

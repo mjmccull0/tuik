@@ -4,6 +4,8 @@ import (
 	"strings"
   "github.com/charmbracelet/lipgloss"
   tea "github.com/charmbracelet/bubbletea"
+	"tuik/utils"
+	"regexp"
 )
 
 
@@ -20,32 +22,37 @@ type Context struct {
 
 // components/types.go
 
-func (c Context) Resolve(input string) string {
-	  // If we have no data, we can't replace anything
-    if c.Data == nil {
-        return input 
-    }
-
-    // If there is no placeholder, don't waste time looping
-    if !strings.Contains(input, "{{.") {
+func (c *Context) Resolve(input string) string {
+    if c.Data == nil || !strings.Contains(input, "{{.") {
         return input
     }
 
-    result := input
-    for key, value := range c.Data {
-        placeholder := "{{." + key + "}}"
-        result = strings.ReplaceAll(result, placeholder, value)
-    }
-    return result
+    // This regex handles both {{.key}} and {{.key:-fallback}}
+	  re := regexp.MustCompile(`\{\{\.([a-zA-Z0-9_]+)(?::-(.*?))?\}\}`)
+
+    return re.ReplaceAllStringFunc(input, func(match string) string {
+        submatches := re.FindStringSubmatch(match)
+        key := submatches[1]
+        fallback := submatches[2]
+
+        utils.Log("key: '%s'", key)
+        utils.Log("fallback: '%s'", fallback)
+        // Use the live data from the pointer receiver
+        if val, ok := c.Data[key]; ok && val != "" {
+            utils.Log("val: '%s'", val)
+            return val
+        }
+        return fallback
+    })
 }
 
 type Component interface {
 	// Render now takes Context to handle internal template resolution
-	Render(ctx Context) string
+	Render(ctx *Context) string
 	
 	// Update takes Context so it can potentially modify its behavior 
 	// based on the current state of the view
-	Update(msg tea.Msg, ctx Context) (Component, tea.Cmd)
+	Update(msg tea.Msg, ctx *Context) (Component, tea.Cmd)
 
 	// Focus management
 	Focus()
@@ -112,9 +119,23 @@ type ListHydrationMsg struct {
 	Items []ListItem
 }
 
+func (c *Context) Set(key string, value string) {
+    if c.Data == nil {
+        c.Data = make(map[string]string)
+    }
+    c.Data[key] = value
+}
+
+func (c *Context) ReplacePlaceholders(input string) string {
+  utils.Log("REPLACEMENT INPUT: '%s'", input)
+	output := c.Resolve(input)
+	utils.Log("REPLACEMENT OUTPUT: '%s'", output)
+	return output
+}
+
 // Ensure View is a pointer in the navigator map
 // type Navigator struct { Views map[string]*View ... }
-func (v *View) Update(msg tea.Msg, ctx Context) (Component, tea.Cmd) {
+func (v *View) Update(msg tea.Msg, ctx *Context) (Component, tea.Cmd) {
 	var cmds []tea.Cmd
 	for i, child := range v.Children {
 		// Update each child
@@ -125,7 +146,7 @@ func (v *View) Update(msg tea.Msg, ctx Context) (Component, tea.Cmd) {
 	return v, tea.Batch(cmds...) // Return 'v' as the pointer
 }
 
-func (v *View) Render(ctx Context) string {
+func (v *View) Render(ctx *Context) string {
 	var sections []string
 	for _, child := range v.Children {
 		sections = append(sections, child.Render(ctx))

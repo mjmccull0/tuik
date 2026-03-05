@@ -24,9 +24,14 @@ type model struct {
 	lastOutput string
 }
 
+
+type ShellMsg struct {
+    Command string
+}
+
 type RefreshMsg struct{}
 
-func (m model) resolveString(input string) string {
+func (m *model) resolveString(input string) string {
     // Create a temporary Context object to use its Resolve method
     ctx := components.Context{
         Data: m.getContextData(),
@@ -35,7 +40,7 @@ func (m model) resolveString(input string) string {
 }
 
 // getContextData gathers all current component values into a map for the navigator
-func (m model) getContextData() map[string]string {
+func (m *model) getContextData() map[string]string {
 	m.syncContext()
 	return m.navigator.Context.Data
     // data := make(map[string]string)
@@ -47,7 +52,7 @@ func (m model) getContextData() map[string]string {
 // Define a new message type
 type shellOutputMsg string
 
-func (m model) executeShellCommand(cmdStr string) tea.Cmd {
+func (m *model) executeShellCommand(cmdStr string) tea.Cmd {
     return func() tea.Msg {
         // Use the navigator's wrapped execution instead of raw exec.Command
         output, err := m.navigator.execWrapped(cmdStr)
@@ -66,21 +71,28 @@ func (m model) executeShellCommand(cmdStr string) tea.Cmd {
 
 // prepareCmd returns the *exec.Cmd without running it, useful for tea.ExecProcess
 func (n *Navigator) prepareCmd(cmdStr string) *exec.Cmd {
-	resolved := n.Context.Resolve(cmdStr)
-	finalCmd := resolved
-	if n.Config.ShellFunctions != "" {
-		finalCmd = fmt.Sprintf("source %s; %s", n.Config.ShellFunctions, resolved)
-	}
-	return exec.Command("zsh", "-c", finalCmd)
+    // This ensures 'git_sync' or other custom functions work
+    finalCmd := cmdStr
+
+    if n.Config.ShellFunctions != "" {
+        finalCmd = fmt.Sprintf("source %s; %s", n.Config.ShellFunctions, cmdStr)
+    }
+
+    return exec.Command("zsh", "-c", finalCmd)
 }
 
 // executeForegroundCommand suspends the TUI to run an interactive process
-func (m model) executeForegroundCommand(cmdStr string) tea.Cmd {
+func (m *model) executeForegroundCommand(cmdStr string) tea.Cmd {
 	clearedCmd := fmt.Sprintf("clear -x; tput smcup; clear; { %s; }; tput rmcup", cmdStr)
 
 	// Use our new prepareCmd to get the zsh + source wrapper
+	// c := m.navigator.prepareCmd(cmdStr)
 	c := m.navigator.prepareCmd(clearedCmd)
+	utils.Log("SHELL EXEC: Running '%s' with functions from '%s'", 
+              cmdStr, m.navigator.Config.ShellFunctions)
 	
+	utils.Log("SHELL EXEC: Running Wrapped Foreground Cmd: %s", cmdStr)
+
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		if err != nil && m.logger != nil {
 			m.logger.Printf("Foreground Error: %v", err)
@@ -90,16 +102,15 @@ func (m model) executeForegroundCommand(cmdStr string) tea.Cmd {
 }
 
 func (m *model) syncContext() {
-	view, _ := m.navigator.GetActiveView()
-	// Ensure the data map is initialized
-	if m.navigator.Context.Data == nil {
-		m.navigator.Context.Data = make(map[string]string)
-	}
-	
-	// Use recursion to find data in nested components (like Lists inside Boxes)
-	for _, child := range view.Children {
-		m.extractData(child)
-	}
+    view, _ := m.navigator.GetActiveView()
+    if m.navigator.Context.Data == nil {
+        m.navigator.Context.Data = make(map[string]string)
+    }
+    
+    // Instead of the manual loop, let the recursion do the work
+    for _, child := range view.Children {
+        m.pullComponentData(child)
+    }
 }
 
 func (m *model) extractData(c components.Component) {
@@ -174,11 +185,18 @@ func initialModel(cfg components.Config) model {
 	}
 
 	m := model{navigator: nav}
+
+	// Only sync if we actually have a valid view to sync from
+	if _, ok := nav.Views[nav.ActiveViewID]; ok {
+			m.syncContext()
+	} else {
+			utils.Log("Warning: Initial view %s not found in config", nav.ActiveViewID)
+	}
 	m.syncContext()
 	return m
 }
 
-func (m model) Init() tea.Cmd {
+func (m *model) Init() tea.Cmd {
     // 1. Get the hydration command for the initial view
     _, hydrationCmd := m.navigator.InitView(m.navigator.ActiveViewID)
 
@@ -189,74 +207,69 @@ func (m model) Init() tea.Cmd {
     )
 }
 
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
     switch msg := msg.(type) {
     case tea.WindowSizeMsg:
         m.width, m.height = msg.Width, msg.Height
         return m, nil
 
-	  case RefreshMsg:
-		  _, cmd := m.navigator.InitView(m.navigator.ActiveViewID)
-	    return m, cmd
-		case shellOutputMsg:
-			// Store it in the model so View() can see it
-			m.lastOutput = string(msg)
-			return m, nil
+    case RefreshMsg:
+        _, cmd := m.navigator.InitView(m.navigator.ActiveViewID)
+        return m, cmd
 
-		case components.ActionMsg:
-			// 1. Get current data
-			ctxData := m.getContextData()
-			
-			// 2. Resolve the action string (this swaps {{.selected_branch}} for "main")
-			resolvedAction := m.navigator.Context.Resolve(msg.Action)
-			
-			// 3. Process the resolved action
-			res := m.navigator.ProcessAction(resolvedAction, ctxData)
-			
-			if res.NextViewID != "" {
-				m.lastOutput = ""
-				return m, nil
-			}
-			
-			if res.Command != "" {
-				// Use the same prefix logic here
-				if strings.HasPrefix(res.Command, "shell:") {
-					trimmedCmd := strings.TrimPrefix(res.Command, "shell:")
+    case ShellMsg:
+        return m, m.executeForegroundCommand(msg.Command)
 
-					return m, m.executeForegroundCommand(trimmedCmd)
-				}
-				return m, m.executeShellCommand(res.Command)
-			}
+    case shellOutputMsg:
+        m.lastOutput = string(msg)
+        return m, nil
+
+    case components.ActionMsg:
+        // Remove m.syncContext() from here
+        res := m.navigator.ProcessAction(msg.Action)
+        if res.NextViewID != "" {
+            m.navigator.ActiveViewID = res.NextViewID
+            _, cmd := m.navigator.InitView(res.NextViewID)
+            return m, cmd
+        }
+        if res.Command != "" {
+            return m, m.executeForegroundCommand(res.Command)
+        }
 
     case tea.KeyMsg:
+        // Remove m.syncContext() from here
         switch msg.String() {
         case "ctrl+c", "q":
             return m, tea.Quit
-			  case "esc":
-		        m.lastOutput = ""
-			      return m, nil
+        case "esc":
+            m.lastOutput = ""
+            return m, nil
         }
     }
 
-    // Standard Flow: Only propagate to the view if it wasn't a global key
+    // 1. Standard Flow: Propagate the message to the components
     view, ctx := m.navigator.GetActiveView()
     ctx.Width, ctx.Height = m.width, m.height
 
-    updatedView, viewCmd := view.Update(msg, ctx)
-	  if v, ok := updatedView.(*components.View); ok {
-			m.navigator.Views[m.navigator.ActiveViewID] = v
-	  }
+    updatedView, viewCmd := view.Update(msg, &ctx)
+    if v, ok := updatedView.(*components.View); ok {
+        m.navigator.Views[m.navigator.ActiveViewID] = v
+    }
+
+    // 2. FINAL STEP: Sync the context AFTER the components have processed the message.
+    // This fixes the "one key behind" issue.
+    m.syncContext()
 
     return m, viewCmd
 }
 
-func (m model) View() string {
+func (m *model) View() string {
     // 1. Get the current view from the navigator
     view, ctx := m.navigator.GetActiveView()
     
     // 2. Render the components defined in your JSON
     // This is the "Main Window"
-    mainContent := view.Render(ctx)
+    mainContent := view.Render(&ctx)
 
     // 3. If a command was run, append the result to the bottom
     if m.lastOutput != "" {
@@ -298,7 +311,7 @@ func collectData(v *components.View) map[string]string {
 }
 
 // execute turns a command string into a Bubble Tea command
-func (m model) execute(action string) tea.Cmd {
+func (m *model) execute(action string) tea.Cmd {
   cParts := strings.Fields(action)
   if len(cParts) > 0 {
     return tea.ExecProcess(exec.Command(cParts[0], cParts[1:]...), func(err error) tea.Msg {
@@ -351,7 +364,7 @@ func main() {
     m := initialModel(cfg)
     m.logger = logger 
 
-    p := tea.NewProgram(m, tea.WithAltScreen())
+    p := tea.NewProgram(&m, tea.WithAltScreen())
     if _, err := p.Run(); err != nil {
         fmt.Printf("Runtime error: %v\n", err)
         os.Exit(1)

@@ -12,7 +12,7 @@ type Box struct {
 	Styles   StyleConfig 
 }
 
-func (b *Box) Render(ctx Context) string {
+func (b *Box) Render(ctx *Context) string {
 	var views []string
 	for _, child := range b.Children {
 		views = append(views, child.Render(ctx))
@@ -29,7 +29,7 @@ func (b *Box) Render(ctx Context) string {
 	return b.Styles.ToLipgloss().Render(out)
 }
 
-func (b *Box) Update(msg tea.Msg, ctx Context) (Component, tea.Cmd) {
+func (b *Box) Update(msg tea.Msg, ctx *Context) (Component, tea.Cmd) {
 	var cmds []tea.Cmd
 	for i, child := range b.Children {
 		newComp, cmd := child.Update(msg, ctx)

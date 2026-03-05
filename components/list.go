@@ -3,12 +3,13 @@ package components
 import (
 	"strings"
 	tea "github.com/charmbracelet/bubbletea"
+	"tuik/utils"
 )
 
 // Ensure List implements Component
 var _ Component = (*List)(nil)
 
-func (l List) Render(ctx Context) string {
+func (l *List) Render(ctx *Context) string {
 	// 1. Resolve the input
 	// If input is a string like "{{.types}}", we resolve it via ctx
 	items := l.resolveItems(ctx)
@@ -29,20 +30,25 @@ func (l List) Render(ctx Context) string {
 	return s.String()
 }
 
-func (l List) resolveItems(ctx Context) []ListItem {
+func (l *List) resolveItems(ctx *Context) []ListItem {
     if items, ok := l.Input.([]ListItem); ok {
         return items
     }
 
-    if _, ok := l.Input.(string); ok {
-        // This gives the user immediate feedback that work is happening
-        return []ListItem{{Text: "Loading..."}} 
+    if cmdStr, ok := l.Input.(string); ok {
+        // THIS IS THE MISSING LINK:
+        // This will finally trigger your "REPLACEMENT INPUT" logs.
+        interpolated := ctx.ReplacePlaceholders(cmdStr)
+        
+        // If we haven't fetched data yet, we need to return "Loading"
+        // and let the Navigator/Main loop handle the actual execution.
+        return []ListItem{{Text: "Loading command: " + interpolated}} 
     }
 
     return []ListItem{}
 }
 
-func (l *List) Update(msg tea.Msg, ctx Context) (Component, tea.Cmd) {
+func (l *List) Update(msg tea.Msg, ctx *Context) (Component, tea.Cmd) {
 	  switch msg := msg.(type) {
 				case ListHydrationMsg:
 				// Only update if this message is meant for THIS list
@@ -66,49 +72,46 @@ func (l *List) Update(msg tea.Msg, ctx Context) (Component, tea.Cmd) {
 
     // 2. HANDLE INTERACTION
     switch msg := msg.(type) {
-    case tea.KeyMsg:
+				case tea.KeyMsg:
         switch msg.String() {
         case "j", "down":
-            if l.Cursor < len(items)-1 {
-                l.Cursor++
-            }
+            if l.Cursor < len(items)-1 { l.Cursor++ }
         case "k", "up":
-            if l.Cursor > 0 {
-                l.Cursor--
-            }
+            if l.Cursor > 0 { l.Cursor-- }
         case "enter":
-					// Now this is safe because we've validated 'items' exists
-					selected := items[l.Cursor]
+            // We already have 'items' from above, no need to re-resolve
+            if l.Cursor >= 0 && l.Cursor < len(items) {
+                selected := items[l.Cursor]
 
-					// SAVE TO CONTEXT: Capture the selection so it's available for the next action
-					if l.ID != "" {
-						// ctx.Data[l.ID] = selected.OnPress
-						ctx.Data[l.ID] = selected.Text
-					}
+				        action := selected.OnPress
+				        if action == "" {
+					          action = l.GetAction()
+								}
+                utils.Log("LIST ENTER: Selected='%s' ID='%s' Action='%s'", selected.Text, l.ID, action)
 
-					action := selected.OnPress
-					// If the list has a global on-select template, use that instead
-					if l.OnSelect != "" {
-						action = l.OnSelect
-					}
+                if l.ID != "" {
+                    // This now works because we defined Set above
+                    ctx.Set(l.ID, selected.Text)
+					          utils.Log("CONTEXT SET: %s = %s", l.ID, items[l.Cursor].Text)
+                }
 
-					return l, func() tea.Msg {
-						return ActionMsg{
-							ID:     l.ID,
-							Action: action,
-						}
-					}
+                return l, func() tea.Msg {
+                    return ActionMsg{
+                        ID:     l.ID,
+                        Action: action,
+                    }
+                }
+            }
         }
     }
-
     return l, nil
 }
 
-func (l List) Blur() {}
-func (l List) Focus() {}
-func (l List) IsFocusable() bool { return true }
-func (l List) GetAction() string {
-	items := l.resolveItems(Context{})
+func (l *List) Blur() {}
+func (l *List) Focus() {}
+func (l *List) IsFocusable() bool { return true }
+func (l *List) GetAction() string {
+	items := l.resolveItems(&Context{})
 	if l.Cursor >= 0 && l.Cursor < len(items) {
 		// If the specific item has an on-press, use it.
 		// Otherwise, use the list's general on-select.
@@ -118,12 +121,13 @@ func (l List) GetAction() string {
 	}
 	return l.OnSelect
 }
-func (l List) GetID() string     { return l.ID }
-func (l List) GetType()    string { return "list" }
-func (l List) GetValue() string  {
-	items := l.resolveItems(Context{}) // Simple resolve
-	if len(items) > 0 && l.Cursor >= 0 && l.Cursor < len(items) {
-		return items[l.Cursor].Text
-	}
-	return ""
+func (l *List) GetID() string     { return l.ID }
+func (l *List) GetType()    string { return "list" }
+func (l *List) GetValue() string {
+    items := l.resolveItems(&Context{})
+    if l.Cursor >= 0 && l.Cursor < len(items) {
+        // Return the text of the item the user is currently looking at
+        return items[l.Cursor].Text
+    }
+    return ""
 }

@@ -13,7 +13,7 @@ type Button struct {
 	Styles  StyleConfig
 }
 
-func (b *Button) Render(ctx Context) string {
+func (b *Button) Render(ctx *Context) string {
 	text := ctx.Resolve(b.Text)
 	
 	// Start with the styles defined in JSON (margins, width, etc.)
@@ -38,7 +38,7 @@ func (b *Button) Render(ctx Context) string {
 	return style.Render("  " + text)
 }
 
-func (b *Button) Update(msg tea.Msg, ctx Context) (Component, tea.Cmd) {
+func (b *Button) Update(msg tea.Msg, ctx *Context) (Component, tea.Cmd) {
 	if !b.focused {
 		return b, nil
 	}

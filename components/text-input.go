@@ -1,7 +1,7 @@
 package components
 
 import (
-	"github.com/charmbracelet/lipgloss"
+	// "github.com/charmbracelet/lipgloss"
   "github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	//"fmt"
@@ -14,16 +14,18 @@ type TextInput struct {
 	Model       textinput.Model
 }
 
-func (t TextInput) Render(ctx Context) string {
-	style := lipgloss.NewStyle().PaddingLeft(1).Width(30)
+func (t *TextInput) Render(ctx *Context) string {
+	// style := lipgloss.NewStyle().PaddingLeft(1).Width(30)
 	
-	return style.Border(lipgloss.HiddenBorder()).
-		Underline(true).
-		Foreground(lipgloss.Color("240")). 
-		Render(t.Model.View())
+	// return style.Border(lipgloss.HiddenBorder()).
+	// 	Underline(true).
+	// 	Foreground(lipgloss.Color("240")). 
+	// 	Render(t.Model.View())
+	
+	return t.Model.View()
 }
 
-func (t *TextInput) Update(msg tea.Msg, ctx Context) (Component, tea.Cmd) {
+func (t *TextInput) Update(msg tea.Msg, ctx *Context) (Component, tea.Cmd) {
 	// if k, ok := msg.(tea.KeyMsg); ok {
   //       fmt.Printf("Input received key: %s\n", k.String())
 	// }
@@ -46,8 +48,10 @@ func (t *TextInput) Blur() {
 	t.Model.Blur()
 }
 
-func (t TextInput) GetValue() string { return t.Content }
-func (t TextInput) IsFocusable() bool { return true }
-func (t TextInput) GetID() string     { return t.ID }
-func (t TextInput) GetAction() string { return "" }
-func (t TextInput) GetType() string { return "text-input" }
+func (t *TextInput) GetValue() string {
+	return t.Content
+}
+func (t *TextInput) IsFocusable() bool { return true }
+func (t *TextInput) GetID() string     { return t.ID }
+func (t *TextInput) GetAction() string { return "" }
+func (t *TextInput) GetType() string { return "text-input" }
