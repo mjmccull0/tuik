@@ -101,3 +101,10 @@ func (n *Navigator) DetermineNext(rule any) string {
 
 	return "exit"
 }
+
+// GetView retrieves a view definition and ensures the Navigator's 
+// own config is the source of truth.
+func (n *Navigator) GetView(id string) (View, bool) {
+	v, ok := n.Config.Views[id]
+	return v, ok
+}

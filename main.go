@@ -13,22 +13,21 @@ import (
 const tempOutputFile = "/tmp/tuik_exchange.tmp"
 
 type model struct {
-	cfg          TuikConfig
-	activeViewID string
-	nav          *Navigator // The "Brain"
+	activeViewId string
+	nav          *Navigator
 }
 
 type processFinishedMsg struct {
 	err error
 }
 
-func (m *model) Init() tea.Cmd {
-	return m.runActiveView()
+func (model *model) Init() tea.Cmd {
+	return model.runActiveView()
 }
 
 // runActiveView handles the OS-level execution
-func (m *model) runActiveView() tea.Cmd {
-	v, ok := m.cfg.Views[m.activeViewID]
+func (model *model) runActiveView() tea.Cmd {
+	view, ok := model.nav.GetView(model.activeViewId)
 	if !ok {
 		return tea.Quit
 	}
@@ -37,13 +36,13 @@ func (m *model) runActiveView() tea.Cmd {
 
 	// Use the Navigator to resolve variables for Env and Args
 	env := os.Environ()
-	for k, val := range v.Env {
-		env = append(env, fmt.Sprintf("%s=%s", k, m.nav.Resolve(val)))
+	for k, val := range view.Env {
+		env = append(env, fmt.Sprintf("%s=%s", k, model.nav.Resolve(val)))
 	}
 
-	resolvedArgs := make([]string, len(v.Args))
-	for i, arg := range v.Args {
-		val := m.nav.Resolve(arg)
+	resolvedArgs := make([]string, len(view.Args))
+	for i, arg := range view.Args {
+		val := model.nav.Resolve(arg)
 		if strings.Contains(val, " ") {
 			resolvedArgs[i] = fmt.Sprintf("%q", val)
 		} else {
@@ -51,8 +50,8 @@ func (m *model) runActiveView() tea.Cmd {
 		}
 	}
 
-	cmdString := v.Component + " " + strings.Join(resolvedArgs, " ")
-	if v.Component == "gum" {
+	cmdString := view.Component + " " + strings.Join(resolvedArgs, " ")
+	if view.Component == "gum" {
 		cmdString = fmt.Sprintf("%s > %s", cmdString, tempOutputFile)
 	}
 
@@ -68,60 +67,67 @@ func (m *model) runActiveView() tea.Cmd {
 }
 
 // capture handles the transition after a process exits
-func (m *model) capture(msg processFinishedMsg) (tea.Model, tea.Cmd) {
+func (model *model) capture(msg processFinishedMsg) (tea.Model, tea.Cmd) {
 	// 1. Handle Errors (Canceled or Crashed)
 	if msg.err != nil {
-		if m.activeViewID == m.cfg.Main {
-			return m, tea.Quit
+		// Even here, we can ask the nav for the Main ID if we move it there, 
+		// but for now, model.activeViewId is fine.
+		if model.activeViewId == model.nav.Config.Main {
+			return model, tea.Quit
 		}
-		m.activeViewID = m.cfg.Main
-		return m, m.runActiveView()
+		model.activeViewId = model.nav.Config.Main
+		return model, model.runActiveView()
 	}
 
-	view := m.cfg.Views[m.activeViewID]
+	view, ok := model.nav.GetView(model.activeViewId)
+	if !ok {
+		// If we somehow lost the view, safety exit
+		return model, tea.Quit
+	}
 
 	// 2. Capture Output into Navigator State
 	if out, err := os.ReadFile(tempOutputFile); err == nil {
 		val := strings.TrimSpace(string(out))
-		m.nav.Set("last_output", val)
+		model.nav.Set("last_output", val)
+		
 		if view.SetState != "" {
-			m.nav.Set(view.SetState, val)
+			model.nav.Set(view.SetState, val)
 		}
 		_ = os.WriteFile(tempOutputFile, []byte(""), 0644)
 	}
 
 	// 3. Let Navigator decide where to go
-	nextTarget := m.nav.DetermineNext(view.OnSuccess)
-	return m.navigate(nextTarget)
+	nextTarget := model.nav.DetermineNext(view.OnSuccess)
+	return model.navigate(nextTarget)
 }
 
 // navigate updates the model's current view pointer
-func (m *model) navigate(target string) (tea.Model, tea.Cmd) {
+func (model *model) navigate(target string) (tea.Model, tea.Cmd) {
 	if target == "exit" || target == "" {
-		return m, tea.Quit
+		return model, tea.Quit
 	}
 
 	if strings.HasPrefix(target, "view:") {
-		m.activeViewID = strings.TrimPrefix(target, "view:")
-		return m, m.runActiveView()
+		model.activeViewId = strings.TrimPrefix(target, "view:")
+		return model, model.runActiveView()
 	}
 
-	return m, tea.Quit
+	return model, tea.Quit
 }
 
-func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (model *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case processFinishedMsg:
-		return m.capture(msg)
+		return model.capture(msg)
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
-			return m, tea.Quit
+			return model, tea.Quit
 		}
 	}
-	return m, nil
+	return model, nil
 }
 
-func (m *model) View() string { return "" }
+func (model *model) View() string { return "" }
 
 func main() {
 	if len(os.Args) < 2 {
@@ -149,13 +155,12 @@ func main() {
 	}
 
 	// Initialize the Body
-	m := &model{
-		cfg:          cfg,
-		activeViewID: cfg.Main,
+	model := &model{
+		activeViewId: cfg.Main,
 		nav:          nav,
 	}
 
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(model, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error: %v\n", err)
 	}
