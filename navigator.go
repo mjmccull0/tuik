@@ -108,3 +108,7 @@ func (n *Navigator) GetView(id string) (View, bool) {
 	v, ok := n.Config.Views[id]
 	return v, ok
 }
+
+func (n *Navigator) GetMainId() string {
+	return n.Config.Main
+}

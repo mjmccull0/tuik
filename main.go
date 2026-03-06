@@ -68,24 +68,27 @@ func (model *model) runActiveView() tea.Cmd {
 
 // capture handles the transition after a process exits
 func (model *model) capture(msg processFinishedMsg) (tea.Model, tea.Cmd) {
-	// 1. Handle Errors (Canceled or Crashed)
+	mainId := model.nav.GetMainId()
+
+	// Handle Errors (Canceled or Crashed)
 	if msg.err != nil {
-		// Even here, we can ask the nav for the Main ID if we move it there, 
-		// but for now, model.activeViewId is fine.
-		if model.activeViewId == model.nav.Config.Main {
+		if model.activeViewId == mainId {
 			return model, tea.Quit
 		}
-		model.activeViewId = model.nav.Config.Main
+
+		model.activeViewId = mainId
+
 		return model, model.runActiveView()
 	}
 
 	view, ok := model.nav.GetView(model.activeViewId)
+
 	if !ok {
 		// If we somehow lost the view, safety exit
 		return model, tea.Quit
 	}
 
-	// 2. Capture Output into Navigator State
+	// Capture Output into Navigator State
 	if out, err := os.ReadFile(tempOutputFile); err == nil {
 		val := strings.TrimSpace(string(out))
 		model.nav.Set("last_output", val)
