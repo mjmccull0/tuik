@@ -22,12 +22,14 @@ type processFinishedMsg struct {
 	err error
 }
 
-func (m *model) Init() tea.Cmd {
-	return m.runActiveView()
+func (model *model) Init() tea.Cmd {
+	return model.runActiveView()
 }
 
-func (m *model) runActiveView() tea.Cmd {
-	v, ok := m.cfg.Views[m.activeViewID]
+
+
+func (model *model) runActiveView() tea.Cmd {
+	v, ok := model.cfg.Views[model.activeViewID]
 	if !ok {
 		return tea.Quit
 	}
@@ -36,12 +38,12 @@ func (m *model) runActiveView() tea.Cmd {
 
 	env := os.Environ()
 	for k, val := range v.Env {
-		env = append(env, fmt.Sprintf("%s=%s", k, m.ctx.Resolve(val)))
+		env = append(env, fmt.Sprintf("%s=%s", k, model.ctx.Resolve(val)))
 	}
 
 	resolvedArgs := make([]string, len(v.Args))
 	for i, arg := range v.Args {
-		val := m.ctx.Resolve(arg)
+		val := model.ctx.Resolve(arg)
 		if strings.Contains(val, " ") {
 			resolvedArgs[i] = fmt.Sprintf("%q", val)
 		} else {
@@ -66,89 +68,123 @@ func (m *model) runActiveView() tea.Cmd {
 	})
 }
 
-
-
-func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case processFinishedMsg:
-		if msg.err != nil {
-			if m.activeViewID == m.cfg.Main {
-				return m, tea.Quit
-			}
-			m.activeViewID = m.cfg.Main
-			return m, m.runActiveView()
-		}
-
-		v := m.cfg.Views[m.activeViewID]
-
-		// 1. Capture output into state
-		if out, err := os.ReadFile(tempOutputFile); err == nil && len(out) > 0 {
-			val := strings.TrimSpace(string(out))
-			m.ctx.Data["last_output"] = val
-			if v.SetState != "" {
-				m.ctx.Data[v.SetState] = val
-			}
-			_ = os.WriteFile(tempOutputFile, []byte(""), 0644)
-		}
-
-		// 2. Resolve Navigation and Transition State
-		var nextTarget string
-		switch outcome := v.OnSuccess.(type) {
-		case string:
-			nextTarget = outcome
-
-		case map[string]interface{}:
-			var rawTarget interface{}
-
-			// Check if this is a direct Handoff (has "target")
-			if target, ok := outcome["target"].(string); ok {
-				nextTarget = target
-				rawTarget = outcome
-			} else {
-				// Otherwise, treat as a Branching Map (Menu)
-				choice := m.ctx.Data["last_output"]
-				if branch, ok := outcome[choice]; ok {
-					rawTarget = branch
-				}
-			}
-
-			// Handle the target (whether it came from a Handoff or a Menu Branch)
-			switch t := rawTarget.(type) {
-			case string:
-				nextTarget = t
-			case map[string]interface{}:
-				if targetName, ok := t["target"].(string); ok {
-					nextTarget = targetName
-				}
-				// Apply nested set_state for this transition
-				if newState, ok := t["set_state"].(map[string]interface{}); ok {
-					for k, val := range newState {
-						m.ctx.Data[k] = m.ctx.Resolve(fmt.Sprintf("%v", val))
-					}
-				}
-			}
-		}
-
-		if nextTarget == "exit" || nextTarget == "" {
-			return m, tea.Quit
-		}
-
-		if strings.HasPrefix(nextTarget, "view:") {
-			m.activeViewID = strings.TrimPrefix(nextTarget, "view:")
-			return m, m.runActiveView()
-		}
-
-		return m, tea.Quit
-
-	case tea.KeyMsg:
-		if msg.String() == "ctrl+c" {
-			return m, tea.Quit
+func (model *model) onSuccess(onSuccess map[string]interface{}) {
+	// Apply nested set_state for this transition
+	if newState, ok := onSuccess["set_state"].(map[string]interface{}); ok {
+		for k, val := range newState {
+			model.setState(k, val)
 		}
 	}
-	return m, nil
 }
 
-func (m *model) View() string { return "" }
+func (model *model) setState(key string, value any) {
+    // We use 'any' (alias for interface{}) so we can pass numbers, strings, etc.
+    // We resolve the value immediately so the stored state is always "clean"
+    resolvedValue := model.ctx.Resolve(fmt.Sprintf("%v", value))
+    model.ctx.Data[key] = resolvedValue
+}
+
+func (model *model) updateState(view View) {
+	// 1. Capture output into state
+	if out, err := os.ReadFile(tempOutputFile); err == nil {
+		val := strings.TrimSpace(string(out))
+		model.ctx.Data["last_output"] = val
+		if view.SetState != "" {
+			model.ctx.Data[view.SetState] = val
+		}
+		_ = os.WriteFile(tempOutputFile, []byte(""), 0644)
+	}
+}
+
+func (model *model) navigate (target string) (tea.Model, tea.Cmd) {
+	if target == "exit" || target == "" {
+		return model, tea.Quit
+	}
+
+	if strings.HasPrefix(target, "view:") {
+		model.activeViewID = strings.TrimPrefix(target, "view:")
+
+		return model, model.runActiveView()
+	}
+
+	return model, tea.Quit
+}
+
+func (m *model) transition(v View) (tea.Model, tea.Cmd) {
+	// 1. Simple String Case (The easiest "exit")
+	if target, ok := v.OnSuccess.(string); ok {
+		return m.navigate(target)
+	}
+
+	// 2. Map Case: If it's NOT a map, we don't know what to do. Exit.
+	outcome, ok := v.OnSuccess.(map[string]any)
+	if !ok {
+		return m.navigate("exit")
+	}
+
+	// 3. Resolve "What is the next view?" 
+	// We check for a direct "target" first, then fall back to menu selection.
+	rawTarget := outcome["target"]
+	if rawTarget == nil {
+		choice := m.ctx.Data["last_output"]
+		rawTarget = outcome[choice]
+	}
+
+	// 4. If we still have nothing, we're done.
+	if rawTarget == nil {
+		return m.navigate("exit")
+	}
+
+	// 5. Handle the result (String vs Map)
+	// Notice we don't nest these; they are mutually exclusive.
+	if target, ok := rawTarget.(string); ok {
+		return m.navigate(target)
+	}
+
+	if targetMap, ok := rawTarget.(map[string]any); ok {
+		// Set state if it exists
+		m.onSuccess(targetMap)
+		
+		// Navigate to the target inside the map
+		if next, ok := targetMap["target"].(string); ok {
+			return m.navigate(next)
+		}
+	}
+
+	return m.navigate("exit")
+}
+
+func (model *model) capture(msg tea.Msg) (tea.Model, tea.Cmd) {
+	finishMsg := msg.(processFinishedMsg)
+	
+	if finishMsg.err != nil {
+		if model.activeViewID == model.cfg.Main {
+			return model, tea.Quit
+		}
+
+		model.activeViewID = model.cfg.Main
+		return model, model.runActiveView()
+	}
+
+	view := model.cfg.Views[model.activeViewID]
+	model.updateState(view)
+
+	return model.transition(view)
+}
+
+func (model *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case processFinishedMsg:
+	  return model.capture(msg)
+	case tea.KeyMsg:
+		if msg.String() == "ctrl+c" {
+			return model, tea.Quit
+		}
+	}
+	return model, nil
+}
+
+func (model *model) View() string { return "" }
 
 func main() {
 	if len(os.Args) < 2 {
