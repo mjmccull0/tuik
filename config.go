@@ -5,12 +5,8 @@ type View struct {
 	Component string            `json:"component"`
 	Args      []string          `json:"args"`
 	Env       map[string]string `json:"env"`
-<<<<<<< Updated upstream
-	OnSuccess string            `json:"on_success"` // e.g., "view:next_id" or "exit"
-=======
 	SetState  string            `json:"set_state"`
 	OnSuccess interface{}       `json:"on_success"`
->>>>>>> Stashed changes
 }
 
 // TuikConfig represents the root JSON structure.
