@@ -1,5 +1,5 @@
 {
-  "main": "start",
+  "main": "hub",
   "styles": {
     "primary": "212",
     "muted": "240",
@@ -7,18 +7,17 @@
     "bg": "0"
   },
   "views": {
-    "start": {
+    "hub": {
       "component": "gum",
-      "args": ["input", "--placeholder", "Enter search term..."],
-      "env": {
-        "GUM_INPUT_PROMPT": " ",
-        "GUM_INPUT_PROMPT_FOREGROUND": "{{.styles.primary}}",
-        "GUM_INPUT_CURSOR_FOREGROUND": "{{.styles.primary}}",
-        "GUM_INPUT_HEADER": "FILE SEARCH ENGINE",
-        "GUM_INPUT_HEADER_FOREGROUND": "{{.styles.muted}}",
-        "GUM_INPUT_WIDTH": "50"
-      },
-      "on_success": "view:pick_file"
+      "args": ["choose", "Search Files", "Quick Note", "Exit"],
+      "on_success": {
+        "Search Files": "view:pick_file",
+        "Quick Note": {
+          "target": "view:start",
+          "set_state": { "prompt_text": "Note Content:" }
+        },
+        "Exit": "exit"
+      }
     },
     "pick_file": {
       "component": "gum",
@@ -29,23 +28,44 @@
         "GUM_FILE_HEADER_FOREGROUND": "{{.styles.accent}}",
         "GUM_FILE_SELECTED_FOREGROUND": "{{.styles.primary}}"
       },
-      "on_success": "view:confirm_action"
+      "set_state": "selected_path",
+      "on_success": {
+        "target": "view:confirm",
+        "set_state": {
+          "confirm_msg": "Edit {{.selected_path}}?",
+          "confirm_target": "view:edit_file"
+        }
+      }
     },
-    "confirm_action": {
+    "start": {
       "component": "gum",
-      "args": ["confirm", "Do you want to edit {{.last_output}}?"],
+      "args": ["input", "--placeholder", "{{.prompt_text}}"],
+      "env": {
+        "GUM_INPUT_PROMPT": " ",
+        "GUM_INPUT_PROMPT_FOREGROUND": "{{.styles.primary}}",
+        "GUM_INPUT_CURSOR_FOREGROUND": "{{.styles.primary}}",
+        "GUM_INPUT_HEADER": "FILE SEARCH ENGINE",
+        "GUM_INPUT_HEADER_FOREGROUND": "{{.styles.muted}}",
+        "GUM_INPUT_WIDTH": "50"
+      },
+      "set_state": "user_input",
+      "on_success": "view:hub"
+    },
+    "confirm": {
+      "component": "gum",
+      "args": ["confirm", "{{.confirm_msg}}"],
       "env": {
         "GUM_CONFIRM_PROMPT_FOREGROUND": "{{.styles.accent}}",
         "GUM_CONFIRM_SELECTED_BACKGROUND": "{{.styles.primary}}",
         "GUM_CONFIRM_SELECTED_FOREGROUND": "{{.styles.bg}}",
         "GUM_CONFIRM_UNSELECTED_FOREGROUND": "{{.styles.muted}}"
       },
-      "on_success": "view:edit_file"
+      "on_success": "{{.confirm_target}}"
     },
     "edit_file": {
-      "component": "/snap/bin/nvim",
-      "args": ["{{.last_output}}"],
-      "on_success": "exit"
+      "component": "nvim",
+      "args": ["{{.selected_path}}"],
+      "on_success": "view:hub"
     }
   }
 }
