@@ -9,63 +9,87 @@
   "views": {
     "hub": {
       "component": "gum",
-      "args": ["choose", "Search Files", "Quick Note", "Exit"],
-      "on_success": {
-        "Search Files": "view:pick_file",
+      "args": ["choose", "Pick File", "Input Check", "Quick Note", "Exit"],
+      "handler": {
+        "Pick File": "view:pick_file",
+        "Input Check": {
+          "target": "view:input",
+          "state.set": {
+            "prompt_text": "Input Prompt Text",
+            "confirm_msg": "Does it work?",
+            "confirm_target": "view:hub"
+          }
+        },
         "Quick Note": {
-          "target": "view:start",
-          "set_state": { "prompt_text": "Note Content:" }
+          "target": "view:input",
+          "state.set": { "prompt_text": "Note Content:" }
         },
         "Exit": "exit"
       }
     },
     "pick_file": {
-      "component": "gum",
-      "args": ["file", "."],
+      "component": "gum file .",
       "env": {
         "GUM_FILE_CURSOR_FOREGROUND": "{{.styles.primary}}",
         "GUM_FILE_HEADER": "SELECT A FILE TO OPEN",
         "GUM_FILE_HEADER_FOREGROUND": "{{.styles.accent}}",
         "GUM_FILE_SELECTED_FOREGROUND": "{{.styles.primary}}"
       },
-      "set_state": "selected_path",
-      "on_success": {
-        "target": "view:confirm",
-        "set_state": {
-          "confirm_msg": "Edit {{.selected_path}}?",
-          "confirm_target": "view:edit_file"
+      "handler": {
+        "stdout": "selected_path",
+        "success": {
+          "target": "view:confirm",
+          "state.set": {
+            "confirm_msg": "Edit {{.selected_path}}?",
+            "confirm_target": "view:edit_file"
+          }
         }
       }
     },
-    "start": {
-      "component": "gum",
-      "args": ["input", "--placeholder", "{{.prompt_text}}"],
+    "input": {
+      "component": "gum input",
+      "args": ["--placeholder", "{{.prompt_text}}"],
+      "state.set": {
+        "header": "FILE SEARCH ENGINE"
+      },
+      "handler": {
+        "stdout": "user_input",
+        "success": {
+          "target": "view:confirm",
+          "state.set": {
+            "confirm_msg": "Edit {{.selected_path}}?",
+            "confirm_target": "view:edit_file"
+          }
+        }
+      },
       "env": {
         "GUM_INPUT_PROMPT": " ",
         "GUM_INPUT_PROMPT_FOREGROUND": "{{.styles.primary}}",
         "GUM_INPUT_CURSOR_FOREGROUND": "{{.styles.primary}}",
-        "GUM_INPUT_HEADER": "FILE SEARCH ENGINE",
+        "GUM_INPUT_HEADER": "{{.header}}",
         "GUM_INPUT_HEADER_FOREGROUND": "{{.styles.muted}}",
         "GUM_INPUT_WIDTH": "50"
-      },
-      "set_state": "user_input",
-      "on_success": "view:hub"
+      }
     },
     "confirm": {
-      "component": "gum",
-      "args": ["confirm", "{{.confirm_msg}}"],
+      "component": "gum confirm",
+      "args": ["{{.confirm_msg}}"],
+      "handler": {
+        "success": "{{.confirm_target}}"
+      },
       "env": {
         "GUM_CONFIRM_PROMPT_FOREGROUND": "{{.styles.accent}}",
         "GUM_CONFIRM_SELECTED_BACKGROUND": "{{.styles.primary}}",
         "GUM_CONFIRM_SELECTED_FOREGROUND": "{{.styles.bg}}",
         "GUM_CONFIRM_UNSELECTED_FOREGROUND": "{{.styles.muted}}"
-      },
-      "on_success": "{{.confirm_target}}"
+      }
     },
     "edit_file": {
       "component": "nvim",
       "args": ["{{.selected_path}}"],
-      "on_success": "view:hub"
+      "handler": {
+        "success": "view:hub"
+      }
     }
   }
 }

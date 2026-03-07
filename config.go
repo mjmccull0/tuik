@@ -5,8 +5,8 @@ type View struct {
 	Component string            `json:"component"`
 	Args      []string          `json:"args"`
 	Env       map[string]string `json:"env"`
-	SetState  string            `json:"set_state"`
-	OnSuccess interface{}       `json:"on_success"`
+	StateSet  map[string]any    `json:"state.set,omitempty"`
+	Handler   Handler           `json:"handler,omitempty"`
 }
 
 // TuikConfig represents the root JSON structure.

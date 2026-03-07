@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strings"
+	"encoding/json"
 )
 
 type Navigator struct {
@@ -11,13 +12,21 @@ type Navigator struct {
 	Styles map[string]string
 }
 
+
+type Handler struct {
+	Stdout string          `json:"stdout,omitempty"`
+	Success any            `json:"success,omitempty"`
+	Mapping map[string]any `json:"-"`
+}
+
+
 // Resolve replaces {{.key}} with values from state or {{style.key}} with ANSI codes
 func (n *Navigator) Resolve(input string) string {
 	output := input
 
 	// 1. Resolve Styles: {{.styles.key}}
 	// We do this FIRST so style codes can be embedded in data strings
-	for k, v := range n.Styles {
+	for k, v := range n.Config.Styles {
 		placeholder := fmt.Sprintf("{{.styles.%s}}", k) // Matches your JSON
 		output = strings.ReplaceAll(output, placeholder, v)
 	}
@@ -54,61 +63,72 @@ func (n *Navigator) ApplyState(input any) {
 }
 
 // DetermineNext parses the OnSuccess interface to find the next view string
-func (n *Navigator) DetermineNext(rule any) string {
-	// Case 1: Simple string jump ("on_success": "view:hub")
-	if target, ok := rule.(string); ok {
+func (n *Navigator) DetermineNext(input any) string {
+	if input == nil {
+		return ""
+	}
+
+	switch v := input.(type) {
+	case string:
+		// Simple case: "view:confirm"
+		return n.Resolve(v)
+
+	case map[string]any:
+		// Smart Target case: {"target": "view:confirm", "state.set": {...}}
+		target, _ := v["target"].(string)
+
+		// Apply the "Transition Primes"
+		if primes, ok := v["state.set"].(map[string]any); ok {
+			for key, val := range primes {
+				// We resolve the value so you can pass templates 
+				// like "confirm_msg": "Edit {{.selected_path}}?"
+				resolvedVal := n.Resolve(fmt.Sprintf("%v", val))
+				n.Set(key, resolvedVal)
+			}
+		}
+
 		return n.Resolve(target)
+
+	default:
+		return ""
 	}
+}
 
-	// Case 2: Map-based logic
-	outcome, ok := rule.(map[string]any)
-	if !ok {
-		return "exit"
+func (n *Navigator) HydrateView(view View) {
+	// Process local view variables first
+	for key, val := range view.StateSet {
+		// Resolve ensures we can use styles or other state in our local variables
+		// e.g., "header": "Files for {{.user}}"
+		resolved := n.Resolve(fmt.Sprintf("%v", val))
+		n.Set(key, resolved)
 	}
-
-	var rawTarget any
-
-	// Is it a Handoff? (Contains a direct "target" key)
-	if target, ok := outcome["target"]; ok {
-		rawTarget = target
-		// Apply state changes defined at the handoff level
-		n.ApplyState(outcome)
-	} else {
-		// It's a Branching Menu (keys match the last command's output)
-		choice := n.Data["last_output"]
-		if branch, ok := outcome[choice]; ok {
-			rawTarget = branch
-		}
-	}
-
-	// Now we see what the rawTarget actually is
-	if rawTarget == nil {
-		return "exit"
-	}
-
-	// If the result of the branch was a string, return it
-	if t, ok := rawTarget.(string); ok {
-		return n.Resolve(t)
-	}
-
-	// If the result was another map, apply its state and return its target
-	if tMap, ok := rawTarget.(map[string]any); ok {
-		n.ApplyState(tMap)
-		if target, ok := tMap["target"].(string); ok {
-			return n.Resolve(target)
-		}
-	}
-
-	return "exit"
 }
 
 // GetView retrieves a view definition and ensures the Navigator's 
 // own config is the source of truth.
 func (n *Navigator) GetView(id string) (View, bool) {
-	v, ok := n.Config.Views[id]
-	return v, ok
+	view, ok := n.Config.Views[id]
+	return view, ok
 }
 
 func (n *Navigator) GetMainId() string {
 	return n.Config.Main
+}
+
+// Custom Unmarshaler to catch the dynamic keys
+func (h *Handler) UnmarshalJSON(data []byte) error {
+	type alias Handler
+	var aux alias
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	*h = Handler(aux)
+
+	// Now catch the "wildcard" keys
+	var raw map[string]any
+	json.Unmarshal(data, &raw)
+	delete(raw, "stdout")
+	delete(raw, "success")
+	h.Mapping = raw
+	return nil
 }

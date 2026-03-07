@@ -13,7 +13,7 @@ import (
 const tempOutputFile = "/tmp/tuik_exchange.tmp"
 
 type model struct {
-	activeViewId string
+	activeViewID string
 	nav          *Navigator
 }
 
@@ -27,31 +27,43 @@ func (model *model) Init() tea.Cmd {
 
 // runActiveView handles the OS-level execution
 func (model *model) runActiveView() tea.Cmd {
-	view, ok := model.nav.GetView(model.activeViewId)
+	view, ok := model.nav.GetView(model.activeViewID)
 	if !ok {
 		return tea.Quit
 	}
 
+	// PHASE 1: Local Hydration
+	// We set these before resolving Env or Args so they can use the values
+	for key, val := range view.StateSet {
+		resolvedVal := model.nav.Resolve(fmt.Sprintf("%v", val))
+		model.nav.Set(key, resolvedVal)
+	}
+
 	_ = os.WriteFile(tempOutputFile, []byte(""), 0644)
 
-	// Use the Navigator to resolve variables for Env and Args
+	// Use the Navigator to resolve variables for Env
 	env := os.Environ()
 	for k, val := range view.Env {
 		env = append(env, fmt.Sprintf("%s=%s", k, model.nav.Resolve(val)))
 	}
 
+	// PHASE 2: Hybrid Component + Args logic
 	resolvedArgs := make([]string, len(view.Args))
 	for i, arg := range view.Args {
 		val := model.nav.Resolve(arg)
-		if strings.Contains(val, " ") {
+		// Basic quoting for safety in shell -c
+		if strings.Contains(val, " ") || val == "" {
 			resolvedArgs[i] = fmt.Sprintf("%q", val)
 		} else {
 			resolvedArgs[i] = val
 		}
 	}
 
-	cmdString := view.Component + " " + strings.Join(resolvedArgs, " ")
-	if view.Component == "gum" {
+	// Construct the command from resolved component and args
+	cmdString := model.nav.Resolve(view.Component) + " " + strings.Join(resolvedArgs, " ")
+	
+	// Ensure gum output is redirected to our temp file
+	if strings.HasPrefix(view.Component, "gum") {
 		cmdString = fmt.Sprintf("%s > %s", cmdString, tempOutputFile)
 	}
 
@@ -70,37 +82,45 @@ func (model *model) runActiveView() tea.Cmd {
 func (model *model) capture(msg processFinishedMsg) (tea.Model, tea.Cmd) {
 	mainId := model.nav.GetMainId()
 
-	// Handle Errors (Canceled or Crashed)
+	// 1. Handle Errors (Preserved: returns to main or quits)
 	if msg.err != nil {
-		if model.activeViewId == mainId {
+		if model.activeViewID == mainId {
 			return model, tea.Quit
 		}
-
-		model.activeViewId = mainId
-
+		model.activeViewID = mainId
 		return model, model.runActiveView()
 	}
 
-	view, ok := model.nav.GetView(model.activeViewId)
-
+	view, ok := model.nav.GetView(model.activeViewID)
 	if !ok {
-		// If we somehow lost the view, safety exit
 		return model, tea.Quit
 	}
 
-	// Capture Output into Navigator State
+	// 2. Capture Output & Handle Mapping logic
+	var lastVal string
 	if out, err := os.ReadFile(tempOutputFile); err == nil {
-		val := strings.TrimSpace(string(out))
-		model.nav.Set("last_output", val)
+		lastVal = strings.TrimSpace(string(out))
+		model.nav.Set("last_output", lastVal)
 		
-		if view.SetState != "" {
-			model.nav.Set(view.SetState, val)
+		if view.Handler.Stdout != "" {
+			model.nav.Set(view.Handler.Stdout, lastVal)
 		}
 		_ = os.WriteFile(tempOutputFile, []byte(""), 0644)
 	}
 
-	// 3. Let Navigator decide where to go
-	nextTarget := model.nav.DetermineNext(view.OnSuccess)
+	// 3. Decide the Next Target: Pattern Matching vs. Success Fallback
+	var nextTargetInput any
+
+	// If the output (e.g., "Search Files") exists as a key in our handler map, use it.
+	// This makes your 'hub' view work as written.
+	if specificTarget, exists := view.Handler.Mapping[lastVal]; exists {
+		nextTargetInput = specificTarget
+	} else {
+		// Otherwise, fall back to the explicit 'success' key (for views like 'pick_file')
+		nextTargetInput = view.Handler.Success
+	}
+
+	nextTarget := model.nav.DetermineNext(nextTargetInput)
 	return model.navigate(nextTarget)
 }
 
@@ -111,7 +131,7 @@ func (model *model) navigate(target string) (tea.Model, tea.Cmd) {
 	}
 
 	if strings.HasPrefix(target, "view:") {
-		model.activeViewId = strings.TrimPrefix(target, "view:")
+		model.activeViewID = strings.TrimPrefix(target, "view:")
 		return model, model.runActiveView()
 	}
 
@@ -150,16 +170,14 @@ func main() {
 		return
 	}
 
-	// Initialize the Brain
 	nav := &Navigator{
 		Config: cfg,
 		Data:   make(map[string]string),
 		Styles: cfg.Styles,
 	}
 
-	// Initialize the Body
 	model := &model{
-		activeViewId: cfg.Main,
+		activeViewID: cfg.Main,
 		nav:          nav,
 	}
 
