@@ -1,5 +1,14 @@
 {
   "main": "hub",
+  "config": {
+    "state": {
+      "get": "skate get {{.key}}",
+      "set": "skate set {{.key}} {{.value}}"
+    }
+  },
+  "state.set": {
+    "test_var": "Hello"
+  },
   "styles": {
     "primary": "212",
     "muted": "240",
@@ -11,11 +20,20 @@
       "component": "gum",
       "args": ["choose", "Pick File", "Input Check", "Quick Note", "Exit"],
       "handler": {
-        "Pick File": "view:pick_file",
+        "Pick File": {
+          "target": "view:pick_file",
+          "state.set": {
+            "input_header": "File Search",
+            "input_prompt_text": "Random File Prompt",
+            "confirm_msg": "Confirm file operation? User: {{.test_var}}",
+            "confirm_target": "view:hub"
+          }
+        },
         "Input Check": {
           "target": "view:input",
           "state.set": {
-            "prompt_text": "Input Prompt Text",
+            "input_header": "Input Search",
+            "input_prompt_text": "Input Check Text Set!",
             "confirm_msg": "Does it work?",
             "confirm_target": "view:hub"
           }
@@ -38,27 +56,19 @@
       "handler": {
         "stdout": "selected_path",
         "success": {
-          "target": "view:confirm",
-          "state.set": {
-            "confirm_msg": "Edit {{.selected_path}}?",
-            "confirm_target": "view:edit_file"
-          }
+          "target": "view:confirm"
         }
       }
     },
     "input": {
       "component": "gum input",
-      "args": ["--placeholder", "{{.prompt_text}}"],
-      "state.set": {
-        "header": "FILE SEARCH ENGINE"
-      },
+      "args": ["--placeholder", "{{.input_prompt_text}}"],
       "handler": {
         "stdout": "user_input",
         "success": {
           "target": "view:confirm",
           "state.set": {
-            "confirm_msg": "Edit {{.selected_path}}?",
-            "confirm_target": "view:edit_file"
+            "confirm_msg": "{{.confirm_msg}} Enter: {{.user_input}}"
           }
         }
       },
@@ -66,7 +76,7 @@
         "GUM_INPUT_PROMPT": " ",
         "GUM_INPUT_PROMPT_FOREGROUND": "{{.styles.primary}}",
         "GUM_INPUT_CURSOR_FOREGROUND": "{{.styles.primary}}",
-        "GUM_INPUT_HEADER": "{{.header}}",
+        "GUM_INPUT_HEADER": "{{.input_header}}",
         "GUM_INPUT_HEADER_FOREGROUND": "{{.styles.muted}}",
         "GUM_INPUT_WIDTH": "50"
       }

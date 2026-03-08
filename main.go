@@ -164,22 +164,41 @@ func main() {
 		return
 	}
 
-	var cfg TuikConfig
+	var cfg Tuik
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		fmt.Printf("Error: %v\n", err)
 		return
 	}
 
 	nav := &Navigator{
-		Config: cfg,
+		Tuik: cfg,
 		Data:   make(map[string]string),
-		Styles: cfg.Styles,
+	}
+
+	for k, v := range cfg.StateSet {
+		val := fmt.Sprintf("%v", v)
+
+		// Update local memory immediately
+		// Purposely choosing not to use nav.Set here to avoid duplicate cmd calls.
+    nav.Data[k] = val
+
+		// Persist to skate SYNCHRONOUSLY for the boot phase
+    persistCmd := cfg.Config.State.Set
+    if persistCmd != "" {
+        cmd := strings.ReplaceAll(persistCmd, "{{.key}}", k)
+        cmd = strings.ReplaceAll(cmd, "{{.value}}", val)
+        // No 'go' keyword here! Wait for the command to finish.
+        _ = exec.Command("sh", "-c", cmd).Run()
+    }
 	}
 
 	model := &model{
 		activeViewID: cfg.Main,
 		nav:          nav,
 	}
+
+	initialView, _ := nav.GetView(model.activeViewID)
+	nav.HydrateView(initialView)
 
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
