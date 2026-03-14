@@ -7,7 +7,8 @@
     }
   },
   "state.set": {
-    "test_var": "Hello"
+    "test_var": "Hello",
+    "dirname": "."
   },
   "styles": {
     "primary": "212",
@@ -17,15 +18,31 @@
   },
   "views": {
     "hub": {
-      "component": "gum",
-      "args": ["choose", "Pick File", "Input Check", "Quick Note", "Exit"],
+      "component": "gum choose",
+      "args": [
+        "Pager",
+        "Pick File",
+        "Input Check",
+        "Quick Note",
+        "Exit",
+        "Process Manager"
+      ],
       "handler": {
+        "Pager": {
+          "target": "view:pick_file",
+          "state.set": {
+            "pick_file_header": "Select a file to view",
+            "confirm_msg": "View file: {{.selected_path}}?",
+            "confirm_target": "view:pager"
+          }
+        },
         "Pick File": {
           "target": "view:pick_file",
           "state.set": {
             "input_header": "File Search",
+            "pick_file_header": "Select a file to view",
             "input_prompt_text": "Random File Prompt",
-            "confirm_msg": "Confirm file operation? User: {{.test_var}}",
+            "confirm_msg": "Confirm file operation?",
             "confirm_target": "view:hub"
           }
         },
@@ -42,14 +59,18 @@
           "target": "view:input",
           "state.set": { "prompt_text": "Note Content:" }
         },
-        "Exit": "exit"
+        "Exit": "exit",
+        "Process Manager": {
+          "target": "view:process_manager"
+        }
       }
     },
     "pick_file": {
-      "component": "gum file .",
+      "component": "gum file",
+      "args": ["{{.dirname}}"],
       "env": {
         "GUM_FILE_CURSOR_FOREGROUND": "{{.styles.primary}}",
-        "GUM_FILE_HEADER": "SELECT A FILE TO OPEN",
+        "GUM_FILE_HEADER": "{{.pick_file_header}}",
         "GUM_FILE_HEADER_FOREGROUND": "{{.styles.accent}}",
         "GUM_FILE_SELECTED_FOREGROUND": "{{.styles.primary}}"
       },
@@ -97,6 +118,34 @@
     "edit_file": {
       "component": "nvim",
       "args": ["{{.selected_path}}"],
+      "handler": {
+        "success": "view:hub"
+      }
+    },
+    "pager": {
+      "component": "sh",
+      "args": ["-c", "gum pager", "<",  "{{.selected_path}}"],
+      "handler": {
+        "success": "view:hub"
+      }
+    },
+    "process_manager": {
+      "component": "zsh",
+      "args": ["-c", "ps -eo pid,comm | fzf --header 'Select Process to Terminate'"],
+      "handler": {
+        "stdout": "selected_process",
+        "success": {
+          "target": "view:confirm",
+          "state.set": {
+            "confirm_msg": "Kill process: {{.selected_process}}?",
+            "confirm_target": "view:kill_exec"
+          }
+        }
+      }
+    },
+    "kill_exec": {
+      "component": "sh",
+      "args": ["-c", "echo {{.selected_process}} | awk '{print $1}' | xargs kill -9"],
       "handler": {
         "success": "view:hub"
       }

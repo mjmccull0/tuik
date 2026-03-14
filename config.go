@@ -16,7 +16,7 @@ type View struct {
 	Args      []string          `json:"args"`
 	Env       map[string]string `json:"env"`
 	Config    Config            `json:"config,omitempty"`
-	StateGet map[string]string  `json:"state.get,omitempty"`
+	StateGet  map[string]string `json:"state.get,omitempty"`
 	StateSet  map[string]any    `json:"state.set,omitempty"`
 	Handler   Handler           `json:"handler,omitempty"`
 }
