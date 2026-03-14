@@ -158,6 +158,23 @@ func main() {
 		return
 	}
 
+	arg := os.Args[1]
+
+	// THE DISPATCHER	
+	// Check if the argument is a subcommand (e.g., 'dual-view' -> 'tuik-dual-view')
+	subCommand := "tuik-" + arg
+	if lp, err := exec.LookPath(subCommand); err == nil {
+		// If found, execute the binary and pass remaining args
+		cmd := exec.Command(lp, os.Args[2:]...)
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			os.Exit(1)
+		}
+		return // Important: stop here if we ran a subcommand
+	}
+
 	data, err := os.ReadFile(os.Args[1])
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
