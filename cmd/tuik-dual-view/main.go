@@ -1,12 +1,12 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
-	// "path/filepath"
+	"flag"
+	"strconv"
+	"path/filepath"
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -14,35 +14,59 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// --- TYPES ---
 
-func getEnv(key, fallback string) string {
-	if value, ok := os.LookupEnv(key); ok {
-		return value
-	}
-	return fallback
+type Theme struct {
+	FocusColor  lipgloss.Color
+	BorderColor lipgloss.Color
+	DocMargin   int
 }
-
-var (
-	// Example: TUIK_FOCUS_COLOR=5 (Purple)
-	focusColor = getEnv("TUIK_FOCUS_COLOR", "62") 
-	borderColor = getEnv("TUIK_BORDER_COLOR", "240")
-
-	docStyle = lipgloss.NewStyle().Margin(1, 2)
-	
-	activeStyle = lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder()).
-			BorderForeground(lipgloss.Color(focusColor))
-
-	inactiveStyle = lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder()).
-			BorderForeground(lipgloss.Color(borderColor))
-)
 
 type item struct {
-	title, desc, path string
+	title, desc, path, content string
 }
 
-type editorFinishedMsg struct{ err error }
+type model struct {
+	list          list.Model
+	viewport      viewport.Model
+	theme         Theme
+	focus         focus
+	ready         bool
+	selectedPath  string
+	width, height int
+}
+
+// --- HELPERS ---
+
+func getEnv[T string | int](key string, fallback T) T {
+	value, ok := os.LookupEnv(key)
+	if !ok {
+		return fallback
+	}
+
+	var result any
+	switch any(fallback).(type) {
+	case string:
+		result = value
+	case int:
+		i, err := strconv.Atoi(value)
+		if err != nil {
+			return fallback
+		}
+		result = i
+	}
+	return result.(T)
+}
+
+func LoadTheme() Theme {
+	return Theme{
+		FocusColor:  lipgloss.Color(getEnv("TUIK_COLOR_FOCUS", "62")),
+		BorderColor: lipgloss.Color(getEnv("TUIK_COLOR_BORDER", "240")),
+		DocMargin:   getEnv("TUIK_MARGIN", 1),
+	}
+}
+
+// --- BOILERPLATE ---
 
 func (i item) Title() string       { return i.title }
 func (i item) Description() string { return i.desc }
@@ -54,16 +78,11 @@ const (
 	focusViewport
 )
 
-type model struct {
-	list         list.Model
-	viewport     viewport.Model
-	focus        focus
-	ready        bool
-	selectedPath string
-	width, height int
-}
+type editorFinishedMsg struct{ err error }
 
 func (m model) Init() tea.Cmd { return nil }
+
+// --- UPDATE & VIEW (Using m.theme) ---
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
@@ -73,91 +92,69 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return m, tea.Quit
-		case "g":
-			if m.focus == focusViewport {
-				m.viewport.GotoTop()
-			}
-		case "G":
-			if m.focus == focusViewport {
-				m.viewport.GotoBottom()
-			}
 		case "h", "left":
-		  m.focus = focusList
+			m.focus = focusList
 		case "l", "right":
-		  m.focus = focusViewport
+			m.focus = focusViewport
+		case "g":
+			if m.focus == focusViewport { m.viewport.GotoTop() }
+		case "G":
+			if m.focus == focusViewport { m.viewport.GotoBottom() }
 		case "e":
 			if i, ok := m.list.SelectedItem().(item); ok {
-        editor := os.Getenv("EDITOR")
-        if editor == "" {
-            editor = "vi" // Fallback
-        }
-
-        // Create the command
-        c := exec.Command(editor, i.path)
-        
-        // tea.ExecProcess takes a command and a termination function.
-        // It pauses the TUI and gives the editor full control of Stdin/Stdout.
-        return m, tea.ExecProcess(c, func(err error) tea.Msg {
-            return editorFinishedMsg{err}
-        })
-    }
-		case "enter":
-			if i, ok := m.list.SelectedItem().(item); ok {
-				m.selectedPath = i.path
-				return m, tea.Quit
+				editor := getEnv("EDITOR", "vi")
+				c := exec.Command(editor, i.path)
+				return m, tea.ExecProcess(c, func(err error) tea.Msg {
+					return editorFinishedMsg{err}
+				})
 			}
-
 		}
-
-	// You'll also need to handle the message returned when the editor closes:
-	case editorFinishedMsg:
-		if msg.err != nil {
-				return m, tea.Quit // Or handle error
-		}
-		// Optional: Refresh the viewport content in case the file changed
-		if i, ok := m.list.SelectedItem().(item); ok {
-				content, _ := ioutil.ReadFile(i.path)
-				m.viewport.SetContent(string(content))
-		}
-		return m, nil
 
 	case tea.WindowSizeMsg:
-		m.width, m.height = msg.Width, msg.Height
+    m.width, m.height = msg.Width, msg.Height
 
-		// Calculate horizontal space
-    // Total width minus document margins and the gap between panes
-    hMargin, vMargin := docStyle.GetFrameSize()
+    hMargin := m.theme.DocMargin * 2
+    vMargin := m.theme.DocMargin * 2
+
+    // 1. Calculate available width after document margins
     totalAvailWidth := msg.Width - hMargin
-		
-		// Split screen: 1/3 for list, 2/3 for preview
-		listWidth := totalAvailWidth / 3
+    
+    // 2. Fixed size for the list (1/3 of the screen)
+    listWidth := totalAvailWidth / 3
+    
+    // 3. GREEDY math for the viewport:
+    // Subtract the list width, and EXACTLY 4 cells for the borders 
+    // (2 for the list border, 2 for the viewport border)
+    viewWidth := totalAvailWidth - listWidth - 4
 
-		// Calculate vertical space
-    // Total height minus top/bottom margins and 1 row for your help bar
-    availHeight := msg.Height - vMargin - 3 // -3 accounts for borders and footer
+    // 4. Handle height (subtract footer and margins)
+    availHeight := msg.Height - vMargin - 3
 
-		m.list.SetSize(listWidth, availHeight)
+    m.list.SetSize(listWidth, availHeight)
+    
+    if !m.ready {
+        m.viewport = viewport.New(viewWidth, availHeight)
+        m.ready = true
+    } else {
+        m.viewport.Width = viewWidth
+        m.viewport.Height = availHeight
+    }
 
-	  viewWidth := totalAvailWidth - listWidth - 4	
-		if !m.ready {
-			m.viewport = viewport.New(viewWidth, availHeight)
-			m.ready = true
-		} else {
-			m.viewport.Width = viewWidth
-			m.viewport.Height = availHeight
+	case editorFinishedMsg:
+		if i, ok := m.list.SelectedItem().(item); ok {
+			content, _ := os.ReadFile(i.path)
+			i.content = string(content) // Update the stored content
+			m.viewport.SetContent(i.content)
 		}
 	}
 
-  // Logic: Send keys to the component that has focus
+	// Route updates
 	if m.focus == focusList {
 		var cmd tea.Cmd
 		m.list, cmd = m.list.Update(msg)
 		cmds = append(cmds, cmd)
-
-		// Update preview whenever list selection changes
 		if i, ok := m.list.SelectedItem().(item); ok {
-			content, _ := ioutil.ReadFile(i.path)
-			m.viewport.SetContent(string(content))
+			m.viewport.SetContent(i.content)
 		}
 	} else {
 		var cmd tea.Cmd
@@ -169,80 +166,56 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() string {
-	if !m.ready {
-		return "\n  Initializing..."
-	}
+	if !m.ready { return "\n  Initializing..." }
 
-	// Panes
-	// Apply styles based on focus
+	baseStyle := lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(m.theme.BorderColor)
+
 	var lStyle, vStyle lipgloss.Style
 	if m.focus == focusList {
-		lStyle = activeStyle.Copy()
-		vStyle = inactiveStyle.Copy()
+		lStyle = baseStyle.Copy().BorderForeground(m.theme.FocusColor).Width(m.list.Width())
+		vStyle = baseStyle.Copy().Width(m.viewport.Width)
 	} else {
-		lStyle = inactiveStyle.Copy()
-		vStyle = activeStyle.Copy()
+		lStyle = baseStyle.Copy().Width(m.list.Width())
+		vStyle = baseStyle.Copy().BorderForeground(m.theme.FocusColor).Width(m.viewport.Width)
 	}
 
-	// APPLY the widths to the styles
-	// The list.View() already has its own internal padding, 
-	// but the border needs to know how wide to be.
-	lStyle = lStyle.Width(m.list.Width())
-	vStyle = vStyle.Width(m.viewport.Width)
+	panes := lipgloss.JoinHorizontal(lipgloss.Top, lStyle.Render(m.list.View()), vStyle.Render(m.viewport.View()))
+	help := lipgloss.NewStyle().Foreground(lipgloss.Color("241")).MarginLeft(2).
+		Render("h/l: focus • g/G: top/bottom • e: edit • q: quit")
 
-	panes := lipgloss.JoinHorizontal(
-			lipgloss.Top,
-	lStyle.Render(m.list.View()),
-					 vStyle.Render(m.viewport.View()),
-	)
-
-	// Global Footer (Outside the panes)
-	helpStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241")).
-	  Margin(0, 0, 1, 2)
-
-	help := helpStyle.Render("h/l: switch focus • j/k: scroll • e: edit • enter: select • q: quit")
-
-	// Vertical Stack
-	return docStyle.Render(
-		lipgloss.JoinVertical(
-			lipgloss.Left, 
-			panes, 
-			help,
-		),
-	)
+	return lipgloss.NewStyle().Margin(m.theme.DocMargin).
+		Render(lipgloss.JoinVertical(lipgloss.Left, panes, help))
 }
 
 func main() {
-	files, _ := ioutil.ReadDir(".")
+	titleFlag := flag.String("title", "Navigator", "Pane title")
+	flag.Parse()
+
+	targetDir := "."
+	if args := flag.Args(); len(args) > 0 { targetDir = args[0] }
+
+	files, _ := os.ReadDir(targetDir)
 	var items []list.Item
 	for _, f := range files {
 		if !f.IsDir() {
-			items = append(items, item{title: f.Name(), desc: "File", path: f.Name()})
+			path := filepath.Join(targetDir, f.Name())
+			content, _ := os.ReadFile(path)
+			items = append(items, item{title: f.Name(), desc: "File", path: path, content: string(content)})
 		}
 	}
 
 	m := model{
-		list: list.New(items, list.NewDefaultDelegate(), 0, 0),
+		list:  list.New(items, list.NewDefaultDelegate(), 0, 0),
 		focus: focusList,
+		theme: LoadTheme(),
 	}
-	m.list.Title = "Files"
-	m.list.SetShowHelp(false) // Hide list pane help menu
+	m.list.Title = *titleFlag
+	m.list.SetShowHelp(false)
 
-	// Run TUI
-	p := tea.NewProgram(m, tea.WithAltScreen())
-	finalModel, err := p.Run()
-
-	if err != nil {
-		fmt.Println("Error running program:", err)
+	if _, err := tea.NewProgram(m, tea.WithAltScreen()).Run(); err != nil {
+		fmt.Println("Error:", err)
 		os.Exit(1)
-	}
-
-	// 3. Emit JSON Protocol
-	if m, ok := finalModel.(model); ok && m.selectedPath != "" {
-		output := map[string]string{"selected_path": m.selectedPath}
-		jsonBytes, _ := json.Marshal(output)
-		// tuik will capture this stdout
-		fmt.Println(string(jsonBytes))
 	}
 }
