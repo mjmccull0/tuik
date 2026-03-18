@@ -1,0 +1,12 @@
+direction: horizontal
+panes:
+  - id: "explorer"
+    title: "FILE PATH"
+    width_pc: 30
+    # You type "/etc/passwd" here
+  - id: "inspector"
+    title: "FILE METADATA"
+    width_pc: 70
+    watches: "explorer"
+    cmd: "stat {{explorer}}" 
+    # This automatically runs "stat /etc/passwd"

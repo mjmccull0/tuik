@@ -1,0 +1,11 @@
+panes:
+  - id: "hero"
+    type: "static"
+    properties:
+      content: "██╗██╗██╗\n╚═╝╚═╝╚═╝" # ASCII Art
+      focusable: false 
+  - id: "files"
+    type: "list"
+    properties:
+      source: "ls -1"
+      focusable: true

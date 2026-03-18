@@ -1,0 +1,10 @@
+direction: horizontal
+panes:
+  - id: "explorer"
+    title: "FILES"
+    width_pc: 20
+  - id: "viewer"
+    title: "PREVIEW"
+    width_pc: 80
+    watches: "explorer"
+    cmd: "cat {{explorer}}"
