@@ -1,0 +1,17 @@
+direction: vertical
+panes:
+  - id: "top_bar"
+    title: "NAV"
+    height_pc: 10
+  - direction: horizontal
+    height_pc: 80
+    panes:
+      - id: "left_nav"
+        title: "MENU"
+        width_pc: 20
+      - id: "workspace"
+        title: "MAIN WORKSPACE"
+        width_pc: 80
+  - id: "status_bar"
+    title: "STATUS"
+    height_pc: 10

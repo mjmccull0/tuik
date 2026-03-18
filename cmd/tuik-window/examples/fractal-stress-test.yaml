@@ -1,0 +1,26 @@
+direction: horizontal
+panes:
+  - id: "far_left"
+    title: "EXPLORER"
+    width_pc: 15
+  - direction: vertical
+    width_pc: 85
+    panes:
+      - direction: horizontal
+        height_pc: 70
+        panes:
+          - id: "primary_editor"
+            title: "MAIN.GO"
+            width_pc: 60
+          - direction: vertical
+            width_pc: 40
+            panes:
+              - id: "docs"
+                title: "DOCUMENTATION"
+                height_pc: 50
+              - id: "outline"
+                title: "SYMBOLS"
+                height_pc: 50
+      - id: "terminal_bottom"
+        title: "ZSH"
+        height_pc: 30

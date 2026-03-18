@@ -1,0 +1,20 @@
+direction: horizontal
+panes:
+  - direction: vertical
+    width_pc: 50
+    panes:
+      - id: "service_a"
+        title: "AUTH SERVICE"
+        height_pc: 50
+      - id: "service_b"
+        title: "PAYMENT SERVICE"
+        height_pc: 50
+  - direction: vertical
+    width_pc: 50
+    panes:
+      - id: "service_c"
+        title: "INVENTORY"
+        height_pc: 50
+      - id: "service_d"
+        title: "SHIPPING"
+        height_pc: 50

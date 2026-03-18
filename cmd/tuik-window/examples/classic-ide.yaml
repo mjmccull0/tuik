@@ -1,0 +1,16 @@
+direction: horizontal
+panes:
+  - id: "sidebar"
+    title: "FILES"
+    width_pc: 20
+    height_pc: 100
+  - id: "main_stack"
+    direction: vertical
+    width_pc: 80
+    panes:
+      - id: "editor"
+        title: "EDITOR"
+        height_pc: 70
+      - id: "logs"
+        title: "LOGS"
+        height_pc: 30
