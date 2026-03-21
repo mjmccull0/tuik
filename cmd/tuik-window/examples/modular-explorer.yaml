@@ -1,0 +1,15 @@
+id: "explorer"
+title: "Reusable Explorer"
+direction: horizontal
+panes:
+  - id: "files"
+    title: "Files"
+    type: "list"
+    width_pc: 40
+    cmd: "ls -1"
+  - id: "preview"
+    title: "Quick View"
+    type: "input"
+    width_pc: 60
+    watches: "files"
+    cmd: "cat {{files}}"

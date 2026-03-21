@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbletea"
@@ -46,10 +47,10 @@ func (s *StaticComponent) Blur()                                   {}
 
 type Action struct {
 	Pattern    string `yaml:"pattern"`
-	ActionType string `yaml:"action_type"` // "set_state" or "exec" (default)
+	ActionType string `yaml:"action_type"` // "set_state", "exec", "push_screen", "back"
 	StateKey   string `yaml:"key"`         // For set_state
 	Value      string `yaml:"value"`       // For set_state
-	Target     string `yaml:"target"`      // For exec
+	Target     string `yaml:"target"`      // For exec or push_screen (Screen ID)
 	Cmd        string `yaml:"cmd"`         // For exec
 	TriggerKey string `yaml:"trigger_key"` // e.g. "enter"
 }
@@ -411,6 +412,13 @@ type Config struct {
 	Focusable   *bool    `yaml:"focusable"`
 	Secure      bool     `yaml:"secure"`
 	HistoryFile string   `yaml:"history_file"`
+	Shortcut    string   `yaml:"shortcut"`
+	Src         string   `yaml:"src"`
+}
+
+type TopLevelConfig struct {
+	Screens       []Config `yaml:"screens"`
+	ShowShortcuts bool     `yaml:"show_shortcuts"`
 }
 
 type pane struct {
@@ -419,33 +427,39 @@ type pane struct {
 	lastValue string
 }
 
+type screen struct {
+	conf      Config
+	flatPanes []*pane
+	focusIdx  int
+}
+
+type ReloadMsg struct {
+	Top TopLevelConfig
+}
+
 type model struct {
-	rootConf   Config
-	flatPanes  []*pane
-	focusIndex int
-	width      int
-	height     int
-	state      map[string]string
+	configPath    string
+	topConf       TopLevelConfig
+	screens       []*screen
+	activeIdx     int
+	navStack      []int // Stack of screen indices
+	width, height int
+	state         map[string]string
 }
 
 func (m *model) resolve(template string) string {
 	res := template
-	// 1. Inject Global State (e.g. {{state.cwd}})
+	s := m.screens[m.activeIdx]
+	// 1. Inject Global State
 	for k, v := range m.state {
 		res = strings.ReplaceAll(res, "{{state."+k+"}}", v)
 		res = strings.ReplaceAll(res, "[[state."+k+"]]", v)
 	}
-	// 2. Inject Pane Values
-	for _, p := range m.flatPanes {
+	// 2. Inject Pane Values FROM ACTIVE SCREEN
+	for _, p := range s.flatPanes {
 		val := strings.TrimSpace(p.model.Value())
 		val = strings.TrimSuffix(val, "/")
-
-		// Mandatory: {{id}}
 		res = strings.ReplaceAll(res, "{{"+p.conf.ID+"}}", val)
-
-		// Optional: [[id]] 
-		// If the value is empty, we remove the placeholder. 
-		// If it exists, we can optionally wrap it in a prefix (e.g. for flags)
 		if val == "" {
 			res = strings.ReplaceAll(res, "[["+p.conf.ID+"]]", "")
 		} else {
@@ -456,13 +470,13 @@ func (m *model) resolve(template string) string {
 }
 
 func (m *model) saveHistory() {
-	for _, p := range m.flatPanes {
+	s := m.screens[m.activeIdx]
+	for _, p := range s.flatPanes {
 		if p.conf.HistoryFile != "" {
 			val := strings.TrimSpace(p.model.Value())
 			if val == "" {
 				continue
 			}
-			// Append to file, ensuring no duplicates in the immediate last entry
 			content, _ := os.ReadFile(p.conf.HistoryFile)
 			lines := strings.Split(string(content), "\n")
 			if len(lines) > 0 && lines[len(lines)-1] == val {
@@ -476,8 +490,9 @@ func (m *model) saveHistory() {
 }
 
 func (m *model) executeAndSet(targetID, shellCmd string) {
+	s := m.screens[m.activeIdx]
 	var target *pane
-	for _, p := range m.flatPanes {
+	for _, p := range s.flatPanes {
 		if p.conf.ID == targetID {
 			target = p
 			break
@@ -488,9 +503,6 @@ func (m *model) executeAndSet(targetID, shellCmd string) {
 	}
 
 	finalCmd := m.resolve(shellCmd)
-
-	// SAFETY GASKET: Only block on mandatory {{id}} placeholders. 
-	// [[id]] placeholders that were empty are already gone.
 	if strings.Contains(finalCmd, "{{") {
 		return
 	}
@@ -502,20 +514,17 @@ func (m *model) executeAndSet(targetID, shellCmd string) {
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		// Just show the error in the viewer so we know why it failed
 		target.model.SetValue(fmt.Sprintf("Shell Error: %v\nCommand: %s\nOutput: %s", err, finalCmd, string(out)))
 		return
 	}
-
-	// SUCCESS: Save current state to history files
 	m.saveHistory()
-
 	target.model.SetValue(string(out))
 }
 
 func (m *model) runCmd(targetID string, triggerMsg tea.Msg) {
+	s := m.screens[m.activeIdx]
 	var target *pane
-	for _, p := range m.flatPanes {
+	for _, p := range s.flatPanes {
 		if p.conf.ID == targetID {
 			target = p
 			break
@@ -527,22 +536,18 @@ func (m *model) runCmd(targetID string, triggerMsg tea.Msg) {
 
 	var trigger *pane
 	if target.conf.Watches != "" {
-		for _, p := range m.flatPanes {
+		for _, p := range s.flatPanes {
 			if p.conf.ID == target.conf.Watches {
 				trigger = p
 				break
 			}
 		}
 	}
-
-	// SELF-TRIGGER: If no watch is defined, the target triggers itself.
 	if trigger == nil {
 		trigger = target
 	}
-
 	triggerVal := strings.TrimSpace(trigger.model.Value())
 
-	// --- Action Processing ---
 	if trigger != nil && len(trigger.conf.Actions) > 0 {
 		keyMsg, isKey := triggerMsg.(tea.KeyMsg)
 		for _, action := range trigger.conf.Actions {
@@ -551,37 +556,44 @@ func (m *model) runCmd(targetID string, triggerMsg tea.Msg) {
 					continue
 				}
 			}
-
 			matched, _ := regexp.MatchString(action.Pattern, triggerVal)
 			if matched {
-				// 1. Handle state updates
-				if action.ActionType == "set_state" && action.StateKey != "" {
-					// Use resolve to allow referencing other panes in the new state value
+				switch action.ActionType {
+				case "push_screen":
+					for i, sc := range m.screens {
+						if sc.conf.ID == action.Target {
+							m.navStack = append(m.navStack, m.activeIdx)
+							m.activeIdx = i
+							return
+						}
+					}
+				case "back":
+					if len(m.navStack) > 0 {
+						m.activeIdx = m.navStack[len(m.navStack)-1]
+						m.navStack = m.navStack[:len(m.navStack)-1]
+					}
+					return
+				case "set_state":
 					val := m.resolve(action.Value)
 					m.state[action.StateKey] = filepath.Clean(val)
-
-					// CLEAR WATCHING PANES: When we navigate, clear the other panes
-					for _, other := range m.flatPanes {
+					for _, other := range s.flatPanes {
 						if other.conf.Watches == trigger.conf.ID && other.conf.ID != trigger.conf.ID {
 							other.model.SetValue("")
 						}
 					}
-				}
-
-				// 2. Execute command
-				actTarget := action.Target
-				if actTarget == "" {
-					actTarget = target.conf.ID
-				}
-				if action.Cmd != "" {
-					m.executeAndSet(actTarget, action.Cmd)
+				case "exec", "":
+					actTarget := action.Target
+					if actTarget == "" {
+						actTarget = target.conf.ID
+					}
+					if action.Cmd != "" {
+						m.executeAndSet(actTarget, action.Cmd)
+					}
 				}
 				return
 			}
 		}
 	}
-
-	// Fallback to simple execution if no actions matched or were defined
 	if target.conf.Cmd != "" {
 		m.executeAndSet(target.conf.ID, target.conf.Cmd)
 	}
@@ -589,77 +601,211 @@ func (m *model) runCmd(targetID string, triggerMsg tea.Msg) {
 
 // --- Bubble Tea Interface ---
 
+func (m *model) buildScreens(top TopLevelConfig) {
+	var screens []*screen
+	for _, sc := range top.Screens {
+		var flat []*pane
+		var flatten func(*Config)
+		flatten = func(c *Config) {
+			// YAML INCLUDE
+			if c.Src != "" {
+				subFile, err := os.ReadFile(c.Src)
+				if err == nil {
+					var subConfig Config
+					yaml.Unmarshal(subFile, &subConfig)
+					if c.ID == "" { c.ID = subConfig.ID }
+					if c.Title == "" { c.Title = subConfig.Title }
+					if c.Type == "" { c.Type = subConfig.Type }
+					if c.Direction == "" { c.Direction = subConfig.Direction }
+					if len(c.Panes) == 0 { c.Panes = subConfig.Panes }
+					if c.Cmd == "" { c.Cmd = subConfig.Cmd }
+					if c.Watches == "" { c.Watches = subConfig.Watches }
+					if len(c.Actions) == 0 { c.Actions = subConfig.Actions }
+					if c.Focusable == nil { c.Focusable = subConfig.Focusable }
+					if c.HistoryFile == "" { c.HistoryFile = subConfig.HistoryFile }
+					c.Secure = subConfig.Secure || c.Secure
+				}
+			}
+
+			if len(c.Panes) == 0 {
+				var comp Component
+				switch c.Type {
+				case "static":
+					isFocusable := false
+					if c.Focusable != nil { isFocusable = *c.Focusable }
+					comp = &StaticComponent{Content: c.Title, IsFocusable: isFocusable}
+				case "list":
+					comp = &ListComponent{}
+				case "dropdown":
+					comp = &DropdownComponent{}
+				case "toggle":
+					comp = &ToggleComponent{}
+				case "radio":
+					comp = &RadioComponent{}
+				case "multi":
+					comp = &MultiSelectComponent{}
+				default:
+					ta := textarea.New()
+					ta.Placeholder = "ID: " + c.ID
+					tw := &textareaWrapper{model: ta, IsSecure: c.Secure}
+					if c.HistoryFile != "" {
+						content, _ := os.ReadFile(c.HistoryFile)
+						if len(content) > 0 { tw.History = strings.Split(strings.TrimSpace(string(content)), "\n") }
+					}
+					comp = tw
+				}
+				flat = append(flat, &pane{model: comp, conf: *c})
+			}
+			for i := range c.Panes { flatten(&c.Panes[i]) }
+		}
+		localSc := sc
+		flatten(&localSc)
+		screens = append(screens, &screen{conf: localSc, flatPanes: flat})
+	}
+	m.screens = screens
+	m.topConf = top
+	
+	// Re-run initial commands for the active screen
+	if len(m.screens) > m.activeIdx {
+		s := m.screens[m.activeIdx]
+		for _, p := range s.flatPanes {
+			if p.conf.Cmd != "" && p.conf.Watches == "" {
+				m.runCmd(p.conf.ID, nil)
+			}
+			if p.model.Focusable() && s.focusIdx == 0 {
+				for i, p2 := range s.flatPanes {
+					if p2.model.Focusable() { s.focusIdx = i; break }
+				}
+			}
+		}
+		s.flatPanes[s.focusIdx].model.Focus()
+	}
+}
+
+func watchConfig(path string, p *tea.Program) {
+	var lastMod time.Time
+	for {
+		time.Sleep(1 * time.Second)
+		info, err := os.Stat(path)
+		if err != nil { continue }
+		if lastMod.IsZero() {
+			lastMod = info.ModTime()
+			continue
+		}
+		if info.ModTime().After(lastMod) {
+			lastMod = info.ModTime()
+			file, _ := os.ReadFile(path)
+			var top TopLevelConfig
+			err := yaml.Unmarshal(file, &top)
+			if err != nil {
+				// Try backward compatibility
+				var root Config
+				if yaml.Unmarshal(file, &root) == nil {
+					top.Screens = []Config{root}
+				}
+			}
+			if len(top.Screens) > 0 {
+				p.Send(ReloadMsg{Top: top})
+			}
+		}
+	}
+}
+
 func (m *model) Init() tea.Cmd { return textarea.Blink }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if sReload, ok := msg.(ReloadMsg); ok {
+		m.buildScreens(sReload.Top)
+		return m, nil
+	}
+
+	s := m.screens[m.activeIdx]
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+c", "esc":
+		case "ctrl+c":
+			return m, tea.Quit
+		case "esc":
+			if len(m.navStack) > 0 {
+				m.activeIdx = m.navStack[len(m.navStack)-1]
+				m.navStack = m.navStack[:len(m.navStack)-1]
+				return m, nil
+			}
 			return m, tea.Quit
 		case "tab":
-			m.flatPanes[m.focusIndex].model.Blur()
+			s.flatPanes[s.focusIdx].model.Blur()
 			for {
-				m.focusIndex = (m.focusIndex + 1) % len(m.flatPanes)
-				if m.flatPanes[m.focusIndex].model.Focusable() { break }
+				s.focusIdx = (s.focusIdx + 1) % len(s.flatPanes)
+				if s.flatPanes[s.focusIdx].model.Focusable() {
+					break
+				}
 			}
-			return m, m.flatPanes[m.focusIndex].model.Focus()
+			return m, s.flatPanes[s.focusIdx].model.Focus()
+		}
+
+		// Check dynamic screen shortcuts
+		keyStr := msg.String()
+		for i, sc := range m.screens {
+			if sc.conf.Shortcut != "" && sc.conf.Shortcut == keyStr {
+				s.flatPanes[s.focusIdx].model.Blur()
+				m.activeIdx = i
+				newS := m.screens[m.activeIdx]
+				// Ensure initial commands run for the new screen
+				for _, p := range newS.flatPanes {
+					if p.conf.Cmd != "" && p.conf.Watches == "" {
+						m.runCmd(p.conf.ID, nil)
+					}
+				}
+				return m, newS.flatPanes[newS.focusIdx].model.Focus()
+			}
 		}
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 	}
 
-	// 1. Update focused pane
-	idx := m.focusIndex
+	idx := s.focusIdx
 	var cmd tea.Cmd
-	m.flatPanes[idx].model, cmd = m.flatPanes[idx].model.Update(msg)
+	s.flatPanes[idx].model, cmd = s.flatPanes[idx].model.Update(msg)
 	cmds = append(cmds, cmd)
 
-	// 2. IMMEDIATE KEY ACTION: If this was a key press, check for actions on the focused pane
-	// This allows "enter" to work even if the cursor hasn't moved.
 	if _, isKey := msg.(tea.KeyMsg); isKey {
-		m.runCmd(m.flatPanes[idx].conf.ID, msg)
+		m.runCmd(s.flatPanes[idx].conf.ID, msg)
 	}
 
-	// 3. Cascade changes through watches
 	for i := 0; i < 3; i++ {
 		changed := false
-		for _, p := range m.flatPanes {
+		for _, p := range s.flatPanes {
 			currentVal := p.model.Value()
 			if currentVal != p.lastValue {
 				p.lastValue = currentVal
 				changed = true
-				
-				// Trigger everything that watches this pane
-				for _, other := range m.flatPanes {
+				for _, other := range s.flatPanes {
 					if other.conf.Watches == p.conf.ID {
 						m.runCmd(other.conf.ID, nil)
 					}
 				}
-				
-				// ALSO: check if this pane itself has actions that should trigger when it changes
 				m.runCmd(p.conf.ID, nil)
 			}
 		}
-		if !changed {
-			break
-		}
+		if !changed { break }
 	}
 
 	return m, tea.Batch(cmds...)
 }
 
 func (m *model) renderRecursive(conf Config, w, h int) string {
+	s := m.screens[m.activeIdx]
 	if len(conf.Panes) == 0 {
 		var target *pane
-		for _, p := range m.flatPanes {
+		for _, p := range s.flatPanes {
 			if p.conf.ID == conf.ID {
 				target = p
 				break
 			}
 		}
+		if target == nil { return "ERR: " + conf.ID }
 
 		if !target.model.Focusable() {
 			target.model.SetSize(w, h)
@@ -672,7 +818,7 @@ func (m *model) renderRecursive(conf Config, w, h int) string {
 			Width(w - 2).
 			Height(h - 3)
 
-		if m.flatPanes[m.focusIndex].conf.ID == conf.ID {
+		if s.flatPanes[s.focusIdx].conf.ID == conf.ID {
 			style = style.Border(lipgloss.ThickBorder()).BorderForeground(lipgloss.Color("205"))
 		}
 
@@ -680,10 +826,7 @@ func (m *model) renderRecursive(conf Config, w, h int) string {
 		titleText := conf.Title
 		if conf.ID == "sidebar" {
 			cwd := m.state["cwd"]
-			if len(cwd) > 20 {
-				cwd = "..." + cwd[len(cwd)-17:]
-			}
-			// Show item count for the list
+			if len(cwd) > 20 { cwd = "..." + cwd[len(cwd)-17:] }
 			if l, ok := target.model.(*ListComponent); ok {
 				titleText = fmt.Sprintf(" %s [%d] (%s) ", conf.Title, len(l.Items), cwd)
 			}
@@ -710,10 +853,33 @@ func (m *model) renderRecursive(conf Config, w, h int) string {
 }
 
 func (m *model) View() string {
-	if m.width == 0 {
-		return "Calculating..."
+	if m.width == 0 { return "Calculating..." }
+	s := m.screens[m.activeIdx]
+
+	var tabs []string
+	for i, sc := range m.screens {
+		title := sc.conf.Title
+		if title == "" {
+			title = sc.conf.ID
+		}
+		
+		// Show shortcut only if enabled in config
+		label := title
+		if m.topConf.ShowShortcuts && sc.conf.Shortcut != "" {
+			label = fmt.Sprintf("[%s] %s", sc.conf.Shortcut, title)
+		}
+
+		style := lipgloss.NewStyle().Padding(0, 1)
+		if i == m.activeIdx {
+			style = style.Background(lipgloss.Color("205")).Foreground(lipgloss.Color("0")).Bold(true)
+		} else {
+			style = style.Background(lipgloss.Color("240")).Foreground(lipgloss.Color("255"))
+		}
+		tabs = append(tabs, style.Render(label))
 	}
-	return m.renderRecursive(m.rootConf, m.width, m.height)
+	tabBar := lipgloss.JoinHorizontal(lipgloss.Top, tabs...)
+
+	return tabBar + "\n" + m.renderRecursive(s.conf, m.width, m.height-2)
 }
 
 func main() {
@@ -726,74 +892,92 @@ func main() {
 	}
 
 	file, _ := os.ReadFile(*configPath)
-	var root Config
-	yaml.Unmarshal(file, &root)
-
-	var flat []*pane
-	var flatten func(Config)
-	flatten = func(c Config) {
-		if len(c.Panes) == 0 {
-			var comp Component
-			switch c.Type {
-			case "static":
-				isFocusable := false
-				if c.Focusable != nil {
-					isFocusable = *c.Focusable
-				}
-				comp = &StaticComponent{Content: c.Title, IsFocusable: isFocusable}
-			case "list":
-				comp = &ListComponent{}
-			case "dropdown":
-				comp = &DropdownComponent{}
-			case "toggle":
-				comp = &ToggleComponent{}
-			case "radio":
-				comp = &RadioComponent{}
-			case "multi":
-				comp = &MultiSelectComponent{}
-			default:
-				ta := textarea.New()
-				ta.Placeholder = "ID: " + c.ID
-				tw := &textareaWrapper{model: ta, IsSecure: c.Secure}
-				if c.HistoryFile != "" {
-					content, _ := os.ReadFile(c.HistoryFile)
-					if len(content) > 0 {
-						tw.History = strings.Split(strings.TrimSpace(string(content)), "\n")
-					}
-				}
-				comp = tw
-			}
-			flat = append(flat, &pane{model: comp, conf: c})
-		}
-		for _, child := range c.Panes {
-			flatten(child)
-		}
+	var top TopLevelConfig
+	err := yaml.Unmarshal(file, &top)
+	
+	// Backward compatibility: try parsing as single Config
+	if err != nil || len(top.Screens) == 0 {
+		var root Config
+		yaml.Unmarshal(file, &root)
+		top.Screens = []Config{root}
 	}
-	flatten(root)
+
+	var screens []*screen
+	for _, sc := range top.Screens {
+		var flat []*pane
+		var flatten func(*Config)
+		flatten = func(c *Config) {
+			// YAML INCLUDE: Load from external file if 'src' is present
+			if c.Src != "" {
+				subFile, err := os.ReadFile(c.Src)
+				if err == nil {
+					var subConfig Config
+					yaml.Unmarshal(subFile, &subConfig)
+					// Merge subConfig into current config
+					if c.ID == "" { c.ID = subConfig.ID }
+					if c.Title == "" { c.Title = subConfig.Title }
+					if c.Type == "" { c.Type = subConfig.Type }
+					if c.Direction == "" { c.Direction = subConfig.Direction }
+					if len(c.Panes) == 0 { c.Panes = subConfig.Panes }
+					if c.Cmd == "" { c.Cmd = subConfig.Cmd }
+					if c.Watches == "" { c.Watches = subConfig.Watches }
+					if len(c.Actions) == 0 { c.Actions = subConfig.Actions }
+					if c.Focusable == nil { c.Focusable = subConfig.Focusable }
+					if c.HistoryFile == "" { c.HistoryFile = subConfig.HistoryFile }
+					c.Secure = subConfig.Secure || c.Secure
+				}
+			}
+
+			if len(c.Panes) == 0 {
+				var comp Component
+				switch c.Type {
+				case "static":
+					isFocusable := false
+					if c.Focusable != nil { isFocusable = *c.Focusable }
+					comp = &StaticComponent{Content: c.Title, IsFocusable: isFocusable}
+				case "list":
+					comp = &ListComponent{}
+				case "dropdown":
+					comp = &DropdownComponent{}
+				case "toggle":
+					comp = &ToggleComponent{}
+				case "radio":
+					comp = &RadioComponent{}
+				case "multi":
+					comp = &MultiSelectComponent{}
+				default:
+					ta := textarea.New()
+					ta.Placeholder = "ID: " + c.ID
+					tw := &textareaWrapper{model: ta, IsSecure: c.Secure}
+					if c.HistoryFile != "" {
+						content, _ := os.ReadFile(c.HistoryFile)
+						if len(content) > 0 { tw.History = strings.Split(strings.TrimSpace(string(content)), "\n") }
+					}
+					comp = tw
+				}
+				flat = append(flat, &pane{model: comp, conf: *c})
+			}
+			for i := range c.Panes { flatten(&c.Panes[i]) }
+		}
+		// Since we need to modify the config during flattening (merging 'src'), 
+		// we copy the screen config to a local variable we can take a pointer to.
+		localSc := sc
+		flatten(&localSc)
+		screens = append(screens, &screen{conf: localSc, flatPanes: flat})
+	}
 
 	m := &model{
-		rootConf:  root,
-		flatPanes: flat,
-		state:     make(map[string]string),
+		configPath: *configPath,
+		topConf:    top,
+		state:      make(map[string]string),
 	}
-
 	m.state["cwd"], _ = os.Getwd()
+	m.buildScreens(top)
 
-	for _, p := range m.flatPanes {
-		if p.conf.Cmd != "" && p.conf.Watches == "" {
-			m.runCmd(p.conf.ID, nil)
-		}
-	}
+	p := tea.NewProgram(m, tea.WithAltScreen())
+	go watchConfig(*configPath, p)
 
-	for i, p := range m.flatPanes {
-		if p.model.Focusable() {
-			m.focusIndex = i
-			p.model.Focus()
-			break
-		}
-	}
-
-	if _, err := tea.NewProgram(m, tea.WithAltScreen()).Run(); err != nil {
+	if _, err := p.Run(); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
