@@ -1,0 +1,33 @@
+direction: vertical
+panes:
+  - direction: horizontal
+    height_pc: 30
+    panes:
+      - id: "is_verbose"
+        title: "VERBOSE"
+        type: "toggle"
+        width_pc: 25
+      - id: "env"
+        title: "ENVIRONMENT"
+        type: "radio"
+        width_pc: 25
+        cmd: "printf 'Production\nStaging\nDevelopment'"
+      - id: "tags"
+        title: "TAGS (Space to toggle)"
+        type: "multi"
+        width_pc: 50
+        cmd: "printf 'Web\nAPI\nDatabase\nCache'"
+  - id: "submit"
+    title: "GENERATE COMMAND"
+    type: "static"
+    height_pc: 15
+    focusable: true
+    actions:
+      - pattern: ".*"
+        trigger_key: "enter"
+        target: "result"
+        cmd: "echo 'Deploying to {{env}} (Tags: {{tags}}) [Verbose: {{is_verbose}}]'"
+  - id: "result"
+    title: "RESULT"
+    type: "input"
+    height_pc: 55

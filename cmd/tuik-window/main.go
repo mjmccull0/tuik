@@ -30,7 +30,8 @@ type Component interface {
 }
 
 type StaticComponent struct {
-	Content string
+	Content     string
+	IsFocusable bool
 }
 
 func (s *StaticComponent) Init() tea.Cmd                           { return nil }
@@ -39,7 +40,7 @@ func (s *StaticComponent) View() string                            { return s.Co
 func (s *StaticComponent) SetSize(w, h int)                        {}
 func (s *StaticComponent) Value() string                           { return "" }
 func (s *StaticComponent) SetValue(v string)                       { s.Content = v }
-func (s *StaticComponent) Focusable() bool                         { return false }
+func (s *StaticComponent) Focusable() bool                         { return s.IsFocusable }
 func (s *StaticComponent) Focus() tea.Cmd                          { return nil }
 func (s *StaticComponent) Blur()                                   {}
 
@@ -122,37 +123,294 @@ func (l *ListComponent) View() string {
 	return s.String()
 }
 
+type DropdownComponent struct {
+	Options   []string
+	Cursor    int
+	IsFocused bool
+	Width, Height int
+}
+
+func (d *DropdownComponent) Init() tea.Cmd      { return nil }
+func (d *DropdownComponent) Focusable() bool    { return true }
+func (d *DropdownComponent) Focus() tea.Cmd     { d.IsFocused = true; return nil }
+func (d *DropdownComponent) Blur()              { d.IsFocused = false }
+func (d *DropdownComponent) Value() string {
+	if len(d.Options) > 0 && d.Cursor < len(d.Options) {
+		return d.Options[d.Cursor]
+	}
+	return ""
+}
+func (d *DropdownComponent) SetValue(v string) {
+	d.Options = strings.Split(strings.TrimSpace(v), "\n")
+	if d.Cursor >= len(d.Options) {
+		d.Cursor = 0
+	}
+}
+func (d *DropdownComponent) SetSize(w, h int) { d.Width = w; d.Height = h }
+func (d *DropdownComponent) Update(msg tea.Msg) (Component, tea.Cmd) {
+	if !d.IsFocused {
+		return d, nil
+	}
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "up", "k":
+			if d.Cursor > 0 { d.Cursor-- }
+		case "down", "j":
+			if d.Cursor < len(d.Options)-1 { d.Cursor++ }
+		}
+	}
+	return d, nil
+}
+func (d *DropdownComponent) View() string {
+	if len(d.Options) == 0 {
+		return "[ No Options ]"
+	}
+
+	current := d.Options[d.Cursor]
+	if !d.IsFocused {
+		return lipgloss.NewStyle().
+			Foreground(lipgloss.Color("240")).
+			Render("[ ") + current + lipgloss.NewStyle().
+			Foreground(lipgloss.Color("240")).
+			Render(" ] \u25bc")
+	}
+
+	var s strings.Builder
+	selectedStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("205")).
+		Bold(true)
+	unselectedStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("244"))
+
+	for i, opt := range d.Options {
+		if i == d.Cursor {
+			// Clear pink chevron for the selected item
+			s.WriteString(selectedStyle.Render("> " + opt) + "\n")
+		} else {
+			// Dimmed grey for other items
+			s.WriteString(unselectedStyle.Render("  " + opt) + "\n")
+		}
+		if i >= d.Height-1 {
+			break
+		}
+	}
+	return s.String()
+}
+
+type ToggleComponent struct {
+	Label     string
+	On        bool
+	IsFocused bool
+}
+
+func (t *ToggleComponent) Init() tea.Cmd      { return nil }
+func (t *ToggleComponent) Focusable() bool    { return true }
+func (t *ToggleComponent) Focus() tea.Cmd     { t.IsFocused = true; return nil }
+func (t *ToggleComponent) Blur()              { t.IsFocused = false }
+func (t *ToggleComponent) Value() string {
+	if t.On { return "on" }
+	return ""
+}
+func (t *ToggleComponent) SetValue(v string) { t.Label = v }
+func (t *ToggleComponent) SetSize(w, h int)  {}
+func (t *ToggleComponent) Update(msg tea.Msg) (Component, tea.Cmd) {
+	if !t.IsFocused { return t, nil }
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		if msg.String() == " " || msg.String() == "enter" {
+			t.On = !t.On
+		}
+	}
+	return t, nil
+}
+func (t *ToggleComponent) View() string {
+	box := "[ ]"
+	if t.On { box = "[X]" }
+	style := lipgloss.NewStyle()
+	if t.IsFocused { style = style.Foreground(lipgloss.Color("205")) }
+	return style.Render(box + " " + t.Label)
+}
+
+type RadioComponent struct {
+	Options   []string
+	Cursor    int
+	Selected  int
+	IsFocused bool
+	Width, Height int
+}
+
+func (r *RadioComponent) Init() tea.Cmd      { return nil }
+func (r *RadioComponent) Focusable() bool    { return true }
+func (r *RadioComponent) Focus() tea.Cmd     { r.IsFocused = true; return nil }
+func (r *RadioComponent) Blur()              { r.IsFocused = false }
+func (r *RadioComponent) Value() string {
+	if len(r.Options) > 0 { return r.Options[r.Selected] }
+	return ""
+}
+func (r *RadioComponent) SetValue(v string) {
+	r.Options = strings.Split(strings.TrimSpace(v), "\n")
+}
+func (r *RadioComponent) SetSize(w, h int) { r.Width = w; r.Height = h }
+func (r *RadioComponent) Update(msg tea.Msg) (Component, tea.Cmd) {
+	if !r.IsFocused { return r, nil }
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "up", "k":
+			if r.Cursor > 0 { r.Cursor-- }
+		case "down", "j":
+			if r.Cursor < len(r.Options)-1 { r.Cursor++ }
+		case " ", "enter":
+			r.Selected = r.Cursor
+		}
+	}
+	return r, nil
+}
+func (r *RadioComponent) View() string {
+	var s strings.Builder
+	for i, opt := range r.Options {
+		prefix := "( ) "
+		if i == r.Selected { prefix = "(*) " }
+		line := prefix + opt
+		if i == r.Cursor && r.IsFocused {
+			s.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Render("> "+line) + "\n")
+		} else {
+			s.WriteString("  " + line + "\n")
+		}
+	}
+	return s.String()
+}
+
+type MultiSelectComponent struct {
+	Options   []string
+	Cursor    int
+	Selected  map[int]bool
+	IsFocused bool
+	Width, Height int
+}
+
+func (m *MultiSelectComponent) Init() tea.Cmd      { return nil }
+func (m *MultiSelectComponent) Focusable() bool    { return true }
+func (m *MultiSelectComponent) Focus() tea.Cmd     { m.IsFocused = true; return nil }
+func (m *MultiSelectComponent) Blur()              { m.IsFocused = false }
+func (m *MultiSelectComponent) Value() string {
+	var res []string
+	for i, opt := range m.Options {
+		if m.Selected[i] { res = append(res, opt) }
+	}
+	return strings.Join(res, " ")
+}
+func (m *MultiSelectComponent) SetValue(v string) {
+	m.Options = strings.Split(strings.TrimSpace(v), "\n")
+	if m.Selected == nil { m.Selected = make(map[int]bool) }
+}
+func (m *MultiSelectComponent) SetSize(w, h int) { m.Width = w; m.Height = h }
+func (m *MultiSelectComponent) Update(msg tea.Msg) (Component, tea.Cmd) {
+	if !m.IsFocused { return m, nil }
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "up", "k":
+			if m.Cursor > 0 { m.Cursor-- }
+		case "down", "j":
+			if m.Cursor < len(m.Options)-1 { m.Cursor++ }
+		case " ", "enter":
+			m.Selected[m.Cursor] = !m.Selected[m.Cursor]
+		}
+	}
+	return m, nil
+}
+func (m *MultiSelectComponent) View() string {
+	var s strings.Builder
+	for i, opt := range m.Options {
+		box := "[ ] "
+		if m.Selected[i] { box = "[X] " }
+		line := box + opt
+		if i == m.Cursor && m.IsFocused {
+			s.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Render("> "+line) + "\n")
+		} else {
+			s.WriteString("  " + line + "\n")
+		}
+	}
+	return s.String()
+}
+
 type textareaWrapper struct {
-	model textarea.Model
+	model       textarea.Model
+	IsSecure    bool
+	History     []string
+	HistoryIdx  int
+	IsFocused   bool
 }
 
 func (t *textareaWrapper) Init() tea.Cmd { return textarea.Blink }
 func (t *textareaWrapper) Update(msg tea.Msg) (Component, tea.Cmd) {
+	if !t.IsFocused {
+		return t, nil
+	}
 	var cmd tea.Cmd
+	
+	// History Navigation: Ctrl+P / Ctrl+N to cycle history
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		if len(t.History) > 0 {
+			switch msg.String() {
+			case "ctrl+p": // Previous History
+				t.HistoryIdx = (t.HistoryIdx + 1) % len(t.History)
+				t.model.SetValue(t.History[t.HistoryIdx])
+				return t, nil
+			case "ctrl+n": // Next History
+				t.HistoryIdx = (t.HistoryIdx - 1 + len(t.History)) % len(t.History)
+				t.model.SetValue(t.History[t.HistoryIdx])
+				return t, nil
+			}
+		}
+	}
+
 	t.model, cmd = t.model.Update(msg)
 	return t, cmd
 }
-func (t *textareaWrapper) View() string           { return t.model.View() }
+
+func (t *textareaWrapper) View() string {
+	if t.IsSecure {
+		val := t.model.Value()
+		masked := strings.Repeat("*", len(val))
+		// We still want the cursor to show up
+		return masked
+	}
+	return t.model.View()
+}
+
 func (t *textareaWrapper) SetSize(w, h int)       { t.model.SetWidth(w); t.model.SetHeight(h) }
 func (t *textareaWrapper) Value() string          { return t.model.Value() }
 func (t *textareaWrapper) SetValue(v string)      { t.model.SetValue(v) }
 func (t *textareaWrapper) Focusable() bool        { return true }
-func (t *textareaWrapper) Focus() tea.Cmd         { return t.model.Focus() }
-func (t *textareaWrapper) Blur()                  { t.model.Blur() }
+func (t *textareaWrapper) Focus() tea.Cmd {
+	t.IsFocused = true
+	return t.model.Focus()
+}
+func (t *textareaWrapper) Blur() {
+	t.IsFocused = false
+	t.model.Blur()
+}
 
 // --- Configuration & Model ---
 
 type Config struct {
-	ID        string   `yaml:"id"`
-	Title     string   `yaml:"title"`
-	WidthPC   int      `yaml:"width_pc"`
-	HeightPC  int      `yaml:"height_pc"`
-	Direction string   `yaml:"direction"`
-	Panes     []Config `yaml:"panes"`
-	Cmd       string   `yaml:"cmd"`
-	Watches   string   `yaml:"watches"`
-	Type      string   `yaml:"type"`
-	Actions   []Action `yaml:"actions"`
+	ID          string   `yaml:"id"`
+	Title       string   `yaml:"title"`
+	WidthPC     int      `yaml:"width_pc"`
+	HeightPC    int      `yaml:"height_pc"`
+	Direction   string   `yaml:"direction"`
+	Panes       []Config `yaml:"panes"`
+	Cmd         string   `yaml:"cmd"`
+	Watches     string   `yaml:"watches"`
+	Type        string   `yaml:"type"`
+	Actions     []Action `yaml:"actions"`
+	Focusable   *bool    `yaml:"focusable"`
+	Secure      bool     `yaml:"secure"`
+	HistoryFile string   `yaml:"history_file"`
 }
 
 type pane struct {
@@ -170,7 +428,54 @@ type model struct {
 	state      map[string]string
 }
 
-func (m *model) executeAndSet(targetID, shellCmd, triggerVal string, triggerID string) {
+func (m *model) resolve(template string) string {
+	res := template
+	// 1. Inject Global State (e.g. {{state.cwd}})
+	for k, v := range m.state {
+		res = strings.ReplaceAll(res, "{{state."+k+"}}", v)
+		res = strings.ReplaceAll(res, "[[state."+k+"]]", v)
+	}
+	// 2. Inject Pane Values
+	for _, p := range m.flatPanes {
+		val := strings.TrimSpace(p.model.Value())
+		val = strings.TrimSuffix(val, "/")
+
+		// Mandatory: {{id}}
+		res = strings.ReplaceAll(res, "{{"+p.conf.ID+"}}", val)
+
+		// Optional: [[id]] 
+		// If the value is empty, we remove the placeholder. 
+		// If it exists, we can optionally wrap it in a prefix (e.g. for flags)
+		if val == "" {
+			res = strings.ReplaceAll(res, "[["+p.conf.ID+"]]", "")
+		} else {
+			res = strings.ReplaceAll(res, "[["+p.conf.ID+"]]", val)
+		}
+	}
+	return res
+}
+
+func (m *model) saveHistory() {
+	for _, p := range m.flatPanes {
+		if p.conf.HistoryFile != "" {
+			val := strings.TrimSpace(p.model.Value())
+			if val == "" {
+				continue
+			}
+			// Append to file, ensuring no duplicates in the immediate last entry
+			content, _ := os.ReadFile(p.conf.HistoryFile)
+			lines := strings.Split(string(content), "\n")
+			if len(lines) > 0 && lines[len(lines)-1] == val {
+				continue
+			}
+			f, _ := os.OpenFile(p.conf.HistoryFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			f.WriteString(val + "\n")
+			f.Close()
+		}
+	}
+}
+
+func (m *model) executeAndSet(targetID, shellCmd string) {
 	var target *pane
 	for _, p := range m.flatPanes {
 		if p.conf.ID == targetID {
@@ -182,22 +487,10 @@ func (m *model) executeAndSet(targetID, shellCmd, triggerVal string, triggerID s
 		return
 	}
 
-	finalCmd := shellCmd
+	finalCmd := m.resolve(shellCmd)
 
-	// 1. Perform state-based replacement (e.g. {{state.cwd}})
-	for k, v := range m.state {
-		finalCmd = strings.ReplaceAll(finalCmd, "{{state."+k+"}}", v)
-	}
-
-	// 2. Perform trigger replacement (e.g. {{sidebar}})
-	if triggerID != "" {
-		// SAFETY GASKET: Terminal commands often fail with trailing slashes (e.g. cat folder/)
-		// We trim the slash so 'cat folder/' becomes 'cat folder'
-		cleanVal := strings.TrimSuffix(triggerVal, "/")
-		finalCmd = strings.ReplaceAll(finalCmd, "{{"+triggerID+"}}", cleanVal)
-	}
-
-	// 3. FINAL SAFETY: DO NOT run if placeholders are still present (avoids the "cat {{file_list}}" error)
+	// SAFETY GASKET: Only block on mandatory {{id}} placeholders. 
+	// [[id]] placeholders that were empty are already gone.
 	if strings.Contains(finalCmd, "{{") {
 		return
 	}
@@ -213,6 +506,10 @@ func (m *model) executeAndSet(targetID, shellCmd, triggerVal string, triggerID s
 		target.model.SetValue(fmt.Sprintf("Shell Error: %v\nCommand: %s\nOutput: %s", err, finalCmd, string(out)))
 		return
 	}
+
+	// SUCCESS: Save current state to history files
+	m.saveHistory()
+
 	target.model.SetValue(string(out))
 }
 
@@ -239,24 +536,16 @@ func (m *model) runCmd(targetID string, triggerMsg tea.Msg) {
 	}
 
 	// SELF-TRIGGER: If no watch is defined, the target triggers itself.
-	// This allows actions like navigation within a single pane.
 	if trigger == nil {
 		trigger = target
 	}
 
-	var triggerVal string
-	var triggerID string
-	if trigger != nil {
-		triggerVal = strings.TrimSpace(trigger.model.Value())
-		triggerID = trigger.conf.ID
-	}
+	triggerVal := strings.TrimSpace(trigger.model.Value())
 
 	// --- Action Processing ---
-	// If the trigger has actions, we check if the trigger value matches any pattern.
 	if trigger != nil && len(trigger.conf.Actions) > 0 {
 		keyMsg, isKey := triggerMsg.(tea.KeyMsg)
 		for _, action := range trigger.conf.Actions {
-			// 1. Check if the trigger key matches (if defined)
 			if action.TriggerKey != "" {
 				if !isKey || keyMsg.String() != action.TriggerKey {
 					continue
@@ -265,19 +554,13 @@ func (m *model) runCmd(targetID string, triggerMsg tea.Msg) {
 
 			matched, _ := regexp.MatchString(action.Pattern, triggerVal)
 			if matched {
-				// Handle state updates if specified
+				// 1. Handle state updates
 				if action.ActionType == "set_state" && action.StateKey != "" {
-					val := action.Value
-					// Replace placeholders in the value too
-					for k, v := range m.state {
-						val = strings.ReplaceAll(val, "{{state."+k+"}}", v)
-					}
-					val = strings.ReplaceAll(val, "{{"+triggerID+"}}", strings.TrimSuffix(triggerVal, "/"))
-					
-					// CLEAN THE PATH: Use filepath to resolve ../ and ./
+					// Use resolve to allow referencing other panes in the new state value
+					val := m.resolve(action.Value)
 					m.state[action.StateKey] = filepath.Clean(val)
 
-					// CLEAR WATCHING PANES: When we navigate, it's polite to clear the viewer
+					// CLEAR WATCHING PANES: When we navigate, clear the other panes
 					for _, other := range m.flatPanes {
 						if other.conf.Watches == trigger.conf.ID && other.conf.ID != trigger.conf.ID {
 							other.model.SetValue("")
@@ -285,15 +568,14 @@ func (m *model) runCmd(targetID string, triggerMsg tea.Msg) {
 					}
 				}
 
-				// Execute the command for the specified target (defaulting to current target if empty)
+				// 2. Execute command
 				actTarget := action.Target
 				if actTarget == "" {
 					actTarget = target.conf.ID
 				}
 				if action.Cmd != "" {
-					m.executeAndSet(actTarget, action.Cmd, triggerVal, triggerID)
+					m.executeAndSet(actTarget, action.Cmd)
 				}
-				// We stop at the first match to allow specific-to-general precedence
 				return
 			}
 		}
@@ -301,7 +583,7 @@ func (m *model) runCmd(targetID string, triggerMsg tea.Msg) {
 
 	// Fallback to simple execution if no actions matched or were defined
 	if target.conf.Cmd != "" {
-		m.executeAndSet(target.conf.ID, target.conf.Cmd, triggerVal, triggerID)
+		m.executeAndSet(target.conf.ID, target.conf.Cmd)
 	}
 }
 
@@ -454,13 +736,32 @@ func main() {
 			var comp Component
 			switch c.Type {
 			case "static":
-				comp = &StaticComponent{Content: c.Title}
+				isFocusable := false
+				if c.Focusable != nil {
+					isFocusable = *c.Focusable
+				}
+				comp = &StaticComponent{Content: c.Title, IsFocusable: isFocusable}
 			case "list":
 				comp = &ListComponent{}
+			case "dropdown":
+				comp = &DropdownComponent{}
+			case "toggle":
+				comp = &ToggleComponent{}
+			case "radio":
+				comp = &RadioComponent{}
+			case "multi":
+				comp = &MultiSelectComponent{}
 			default:
 				ta := textarea.New()
 				ta.Placeholder = "ID: " + c.ID
-				comp = &textareaWrapper{model: ta}
+				tw := &textareaWrapper{model: ta, IsSecure: c.Secure}
+				if c.HistoryFile != "" {
+					content, _ := os.ReadFile(c.HistoryFile)
+					if len(content) > 0 {
+						tw.History = strings.Split(strings.TrimSpace(string(content)), "\n")
+					}
+				}
+				comp = tw
 			}
 			flat = append(flat, &pane{model: comp, conf: c})
 		}

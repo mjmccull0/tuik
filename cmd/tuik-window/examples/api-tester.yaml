@@ -1,0 +1,45 @@
+direction: vertical
+panes:
+  - direction: horizontal
+    height_pc: 20
+    panes:
+      - id: "method"
+        title: "METHOD (Tab & j/k)"
+        type: "dropdown"
+        width_pc: 30
+        cmd: "printf 'GET\nPOST\nPUT\nDELETE'" 
+      - id: "url"
+        title: "ENDPOINT URL (Ctrl+P for History)"
+        type: "input"
+        width_pc: 70
+        history_file: ".url_history"
+  - direction: horizontal
+    height_pc: 10
+    panes:
+      - id: "api_key"
+        title: "API KEY (Masked)"
+        type: "input"
+        secure: true
+        width_pc: 100
+  - id: "headers"
+    title: "CUSTOM HEADERS (-H 'Content-Type: application/json')"
+    type: "input"
+    height_pc: 10
+  - id: "body"
+    title: "REQUEST BODY (Optional)"
+    type: "input"
+    height_pc: 15
+  - id: "submit"
+    title: "PRESS ENTER TO RUN"
+    type: "static"
+    height_pc: 10
+    focusable: true
+    actions:
+      - pattern: ".*"
+        trigger_key: "enter"
+        target: "response"
+        cmd: "curl -s -i -X {{method}} {{url}} [[headers]] -H 'Authorization: Bearer [[api_key]]' -d '[[body]]'"
+  - id: "response"
+    title: "SERVER RESPONSE"
+    type: "input"
+    height_pc: 35
