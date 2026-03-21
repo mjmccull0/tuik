@@ -1,0 +1,46 @@
+direction: vertical
+panes:
+  - id: "header"
+    type: "static"
+    height_pc: 15
+    title: |
+      ______ _    _ _____ _   __
+      |_  __| |  | |_   _| | / /
+        | | | |  | | | | | |/ / 
+        | | | |/\| | | | |    \ 
+        | | \  /\  /_| |_| |\  \
+        |_|  \/  \/ \___/\_| \_/
+  - direction: horizontal
+    height_pc: 85
+    panes:
+      - id: "sidebar"
+        title: "EXPLORER"
+        type: "list"
+        width_pc: 30
+        cmd: "ls -F1" 
+        actions:
+          - pattern: "^$"                 # 1. Boot
+            target: "sidebar"
+            cmd: "ls -F1"
+          - pattern: ".*"                 # 2. Go Up (Robust)
+            trigger_key: "backspace"
+            action_type: "set_state"
+            key: "cwd"
+            value: "{{state.cwd}}/.."
+            target: "sidebar"
+            cmd: "ls -F1"
+          - pattern: ".*/$"               # 3. Enter directory
+            trigger_key: "enter"
+            action_type: "set_state"
+            key: "cwd"
+            value: "{{state.cwd}}/{{sidebar}}"
+            target: "sidebar"
+            cmd: "ls -F1"
+          - pattern: "^.*[^/]$"           # 4. Preview File (Automatic)
+            target: "viewer"
+            cmd: "cat {{sidebar}}"
+      - id: "viewer"
+        title: "CONTENT"
+        type: "input"
+        width_pc: 70
+        watches: "sidebar"

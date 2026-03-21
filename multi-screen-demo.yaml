@@ -1,0 +1,47 @@
+show_shortcuts: false
+views:
+  - id: "explorer"
+    title: "Explorer"
+    shortcut: "alt+1"
+    direction: horizontal
+    items:
+      - id: "files"
+        title: "Files (Enter to Inspect)"
+        type: "list"
+        width_pc: 40
+        cmd: "ls -1"
+        actions:
+          - pattern: ".*"
+            trigger_key: "enter"
+            action_type: "push_view"
+            target: "inspector"
+      - id: "preview"
+        title: "Quick View"
+        type: "input"
+        width_pc: 60
+        watches: "files"
+        cmd: "cat {{files}}"
+
+  - id: "inspector"
+    title: "Detailed Inspector"
+    shortcut: "alt+2"
+    direction: vertical
+    items:
+      - id: "header"
+        title: "INSPECTING FILE" 
+        type: "static"
+        height_pc: 20
+      - id: "stats"
+        title: "FILE STATS"
+        type: "input"
+        height_pc: 60
+        cmd: "stat {{files}}"
+      - id: "back_btn"
+        title: "PRESS ENTER TO GO BACK"
+        type: "static"
+        focusable: true
+        height_pc: 20
+        actions:
+          - pattern: ".*"
+            trigger_key: "enter"
+            action_type: "back"

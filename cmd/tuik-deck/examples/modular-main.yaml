@@ -1,0 +1,13 @@
+show_shortcuts: true
+screens:
+  - id: "main"
+    src: "modular-explorer.yaml"
+    shortcut: "alt+1"
+  - id: "settings"
+    title: "Settings Screen"
+    shortcut: "alt+2"
+    panes:
+      - id: "info"
+        title: "VERSION INFO"
+        type: "static"
+        cmd: "echo 'Tuik Modular Engine v1.0'"

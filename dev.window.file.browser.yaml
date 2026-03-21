@@ -1,0 +1,33 @@
+direction: vertical
+panes:
+  - id: "header"
+    type: "static"
+    height_pc: 15
+    title: |
+      ______ _    _ _____ _   __
+      |_  __| |  | |_   _| | / /
+        | | | |  | | | | | |/ / 
+        | | | |/\| | | | |    \ 
+        | | \  /\  /_| |_| |\  \
+        |_|  \/  \/ \___/\_| \_/
+  - direction: horizontal
+    height_pc: 85
+    panes:
+      - id: "file_list"
+        title: "FILES (j/k to scroll)"
+        type: "list"
+        width_pc: 30
+        cmd: "ls -F" # This needs to run on startup
+        actions:
+        - pattern: ".*/$"               # If it looks like a directory
+          target: "sidebar"             # Update MYSELF
+          cmd: "cd {{sidebar}} && ls -F"
+        - pattern: ".*"                 # Catch-all (File)
+          target: "editor"              # Update the OTHER pane
+          cmd: "cat {{sidebar}}"
+      - id: "file_viewer"
+        title: "CONTENT"
+        type: "input"
+        width_pc: 70
+        watches: "file_list"
+        cmd: "cat {{file_list}}"

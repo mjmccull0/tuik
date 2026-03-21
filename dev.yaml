@@ -1,0 +1,12 @@
+- id: "test_suite"
+  type: "list"
+  cmd: "go test -list ."
+  actions:
+    - pattern: "Test.*"
+      trigger_key: "enter"
+      # Action 1: Run the test in the terminal pane
+      - target: "terminal"
+        cmd: "go test -v -run {{test_suite}}"
+      # Action 2: Update a status header
+      - target: "header"
+        cmd: "echo 'Running {{test_suite}}...'"
