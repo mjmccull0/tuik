@@ -314,6 +314,9 @@ type node struct {
 	model     Component
 	conf      Config
 	lastValue string
+	rect struct {
+		x, y, w, h int
+	}
 }
 
 type view struct {
@@ -488,7 +491,27 @@ func (m *model) Init() tea.Cmd { return textarea.Blink }
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if vReload, ok := msg.(ReloadMsg); ok { m.buildViews(vReload.Top); return m, nil }
 	v := m.views[m.activeIdx]
+	
 	switch msg := msg.(type) {
+	case tea.MouseMsg:
+		// We only care about the initial click (MouseLeft)
+		if msg.Type == tea.MouseLeft {
+			for i, n := range v.nodes {
+				// Hit detection: Is the click inside the component's last known position?
+				if msg.X >= n.rect.x && msg.X < n.rect.x+n.rect.w &&
+				   msg.Y >= n.rect.y && msg.Y < n.rect.y+n.rect.h {
+					
+					// If it's a new focusable component, swap them
+					if n.model.Focusable() && i != v.focusIdx {
+						v.nodes[v.focusIdx].model.Blur()
+						v.focusIdx = i
+						return m, v.nodes[v.focusIdx].model.Focus()
+					}
+					break // Found the clicked element, no need to check others
+				}
+			}
+		}
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c": return m, tea.Quit
@@ -502,21 +525,41 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, v.nodes[v.focusIdx].model.Focus()
 		}
-		keyStr := msg.String(); for i, vi := range m.views {
+		
+		keyStr := msg.String()
+		for i, vi := range m.views {
 			if vi.conf.Shortcut != "" && vi.conf.Shortcut == keyStr {
-				v.nodes[v.focusIdx].model.Blur(); m.activeIdx = i; newV := m.views[m.activeIdx]
-				for _, n := range newV.nodes { if n.conf.Cmd != "" && n.conf.Watches == "" { m.runCmd(n.conf.ID, nil) } }
+				v.nodes[v.focusIdx].model.Blur()
+				m.activeIdx = i
+				newV := m.views[m.activeIdx]
+				for _, n := range newV.nodes { 
+					if n.conf.Cmd != "" && n.conf.Watches == "" { m.runCmd(n.conf.ID, nil) } 
+				}
 				return m, newV.nodes[newV.focusIdx].model.Focus()
 			}
 		}
-	case tea.WindowSizeMsg: m.width, m.height = msg.Width, msg.Height
+	case tea.WindowSizeMsg: 
+		m.width, m.height = msg.Width, msg.Height
 	}
-	idx := v.focusIdx; var cmd tea.Cmd; v.nodes[idx].model, cmd = v.nodes[idx].model.Update(msg)
+
+	// Forward the message (Key or Mouse) to the focused component
+	idx := v.focusIdx
+	var cmd tea.Cmd
+	v.nodes[idx].model, cmd = v.nodes[idx].model.Update(msg)
+	
 	if _, isKey := msg.(tea.KeyMsg); isKey { m.runCmd(v.nodes[idx].conf.ID, msg) }
+	
+	// Handle state updates and "Watches"
 	for i := 0; i < 3; i++ {
-		changed := false; for _, n := range v.nodes {
-			val := n.model.Value(); if val != n.lastValue {
-				n.lastValue = val; changed = true; for _, other := range v.nodes { if other.conf.Watches == n.conf.ID { m.runCmd(other.conf.ID, nil) } }
+		changed := false
+		for _, n := range v.nodes {
+			val := n.model.Value()
+			if val != n.lastValue {
+				n.lastValue = val
+				changed = true
+				for _, other := range v.nodes { 
+					if other.conf.Watches == n.conf.ID { m.runCmd(other.conf.ID, nil) } 
+				}
 				m.runCmd(n.conf.ID, nil)
 			}
 		}
@@ -535,13 +578,13 @@ func (m *model) View() string {
 		rendered := style.Render(label); m.tabWidths[i] = lipgloss.Width(rendered); tabs = append(tabs, rendered)
 	}
 	tabBar := lipgloss.JoinHorizontal(lipgloss.Top, tabs...); contentH := m.height - 2; if contentH < 0 { contentH = 0 }
-	content := m.renderRecursive(v.conf, m.width, contentH)
+	content := m.renderRecursive(v.conf, 0, 2, m.width, contentH)
 	statusStyle := lipgloss.NewStyle().Background(lipgloss.Color("235")).Foreground(lipgloss.Color("245")).Width(m.width)
 	statusText := fmt.Sprintf(" VIEW: %s | SIZE: %dx%d | Tab: Cycle | Esc: Back", v.conf.ID, m.width, m.height)
 	return tabBar + "\n" + content + "\n" + statusStyle.Render(statusText)
 }
 
-func (m *model) renderRecursive(conf Config, w, h int) string {
+func (m *model) renderRecursive(conf Config, x, y, w, h int) string {
 	v := m.views[m.activeIdx]
 
 	if len(conf.Items) == 0 {
@@ -553,9 +596,13 @@ func (m *model) renderRecursive(conf Config, w, h int) string {
 			}
 		}
 
-		if target == nil {
-			return "ERR: " + conf.ID
-		}
+		if target == nil { return "ERR: " + conf.ID }
+
+		// Store the coordinates for mouse hit-detection
+		target.rect.x = x
+		target.rect.y = y
+		target.rect.w = w
+		target.rect.h = h
 
 		rawView := target.model.View()
 		userStyle := m.applyYAMLStyle(lipgloss.NewStyle(), conf.Style)
@@ -563,13 +610,7 @@ func (m *model) renderRecursive(conf Config, w, h int) string {
 
 		if !target.model.Focusable() {
 			target.model.SetSize(w, h)
-			return lipgloss.NewStyle().
-				Width(w).
-				Height(h).
-				MaxHeight(h).
-				MaxWidth(w).
-				Align(lipgloss.Top, lipgloss.Left).
-				Render(styledContent)
+			return lipgloss.NewStyle().Width(w).Height(h).MaxHeight(h).MaxWidth(w).Render(styledContent)
 		}
 
 		hasTitle := conf.Title != ""
@@ -584,16 +625,10 @@ func (m *model) renderRecursive(conf Config, w, h int) string {
 			Height(boxH - 2)
 
 		if v.nodes[v.focusIdx].conf.ID == conf.ID {
-			boxStyle = boxStyle.Border(lipgloss.ThickBorder()).
-				BorderForeground(lipgloss.Color("205"))
+			boxStyle = boxStyle.Border(lipgloss.ThickBorder()).BorderForeground(lipgloss.Color("205"))
 		}
 
-		// subtract border height (top + bottom = 2) so the component doesn't
-		// "bleed" out of its box.
-		contentH := boxH - 2 
-		if contentH < 1 { contentH = 1 }
-
-		target.model.SetSize(w-2, contentH)
+		target.model.SetSize(w-2, boxH-2)
 		renderedBox := boxStyle.Render(styledContent)
 
 		if !hasTitle {
@@ -601,11 +636,7 @@ func (m *model) renderRecursive(conf Config, w, h int) string {
 		}
 
 		title := lipgloss.NewStyle().Bold(true).MaxWidth(w).Render(conf.Title)
-		return lipgloss.NewStyle().
-			Width(w).
-			Height(h).
-			MaxHeight(h).
-			MaxWidth(w).
+		return lipgloss.NewStyle().Width(w).Height(h).MaxHeight(h).MaxWidth(w).
 			Render(lipgloss.JoinVertical(lipgloss.Left, title, renderedBox))
 	}
 
@@ -632,7 +663,10 @@ func (m *model) renderRecursive(conf Config, w, h int) string {
 		autoPC = remainingPC / unspecifiedCount
 	}
 
+	// Track the current "Pen" position for the next child
+	currX, currY := x, y
 	remainingW, remainingH := w, usableH
+
 	for i, child := range conf.Items {
 		childW, childH := w, usableH
 		if conf.Direction == "horizontal" {
@@ -643,7 +677,8 @@ func (m *model) renderRecursive(conf Config, w, h int) string {
 				if pc == 0 { pc = autoPC }
 				childW = (w * pc) / 100
 			}
-			children = append(children, m.renderRecursive(child, childW, h))
+			children = append(children, m.renderRecursive(child, currX, currY, childW, h))
+			currX += childW // Move pen right
 			remainingW -= childW
 		} else {
 			if i == len(conf.Items)-1 {
@@ -653,7 +688,9 @@ func (m *model) renderRecursive(conf Config, w, h int) string {
 				if pc == 0 { pc = autoPC }
 				childH = (usableH * pc) / 100
 			}
-			children = append(children, m.renderRecursive(child, w, childH))
+			// Add 1 to currY to account for the newline separator in vertical joins
+			children = append(children, m.renderRecursive(child, currX, currY, w, childH))
+			currY += childH + 1 // Move pen down
 			remainingH -= childH
 		}
 	}
@@ -745,7 +782,7 @@ func main() {
 	m.state["cwd"], _ = os.Getwd()
 	m.buildViews(top)
 
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	go watchConfig(m, p)
 
 	if _, err := p.Run()
