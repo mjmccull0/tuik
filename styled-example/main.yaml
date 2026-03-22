@@ -1,0 +1,29 @@
+views:
+  - id: "main"
+    direction: vertical
+    items:
+      - src: "component/header.yaml"
+      - direction: horizontal
+        height_pc: 20
+        items:
+          - id: "method"
+            title: "METHOD"
+            type: "dropdown"
+            width_pc: 25
+            cmd: "printf 'GET\nPOST\nPUT\nDELETE'"
+          - id: "url"
+            src: "lib/input.yaml"
+            title: "ENDPOINT URL"
+            width_pc: 75
+      - id: "submit"
+        src: "lib/button.yaml"
+        title: "[ EXECUTE REQUEST ]"
+        actions:
+          - pattern: ".*"
+            trigger_key: "enter"
+            target: "response"
+            cmd: "curl -s -i -X {{method}} {{url}}"
+      - id: "response"
+        src: "lib/input.yaml"
+        title: "RESPONSE"
+        height_pc: 35

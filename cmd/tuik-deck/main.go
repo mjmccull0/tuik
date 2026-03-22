@@ -35,15 +35,15 @@ type StaticComponent struct {
 	IsFocusable bool
 }
 
-func (s *StaticComponent) Init() tea.Cmd                           { return nil }
+func (s *StaticComponent) Init() tea.Cmd                 { return nil }
 func (s *StaticComponent) Update(msg tea.Msg) (Component, tea.Cmd) { return s, nil }
-func (s *StaticComponent) View() string                            { return s.Content }
-func (s *StaticComponent) SetSize(w, h int)                        {}
-func (s *StaticComponent) Value() string                           { return "" }
-func (s *StaticComponent) SetValue(v string)                       { s.Content = v }
-func (s *StaticComponent) Focusable() bool                         { return s.IsFocusable }
-func (s *StaticComponent) Focus() tea.Cmd                          { return nil }
-func (s *StaticComponent) Blur()                                   {}
+func (s *StaticComponent) View() string                  { return s.Content }
+func (s *StaticComponent) SetSize(w, h int)           {}
+func (s *StaticComponent) Value() string              { return "" }
+func (s *StaticComponent) SetValue(v string)          { s.Content = v }
+func (s *StaticComponent) Focusable() bool           { return s.IsFocusable }
+func (s *StaticComponent) Focus() tea.Cmd             { return nil }
+func (s *StaticComponent) Blur()                      {}
 
 type Action struct {
 	Pattern    string `yaml:"pattern"`
@@ -57,9 +57,9 @@ type Action struct {
 
 type ListComponent struct {
 	Items         []string
-	Cursor        int
+	Cursor         int
 	Width, Height int
-	IsFocused     bool
+	IsFocused      bool
 }
 
 func (l *ListComponent) Init() tea.Cmd      { return nil }
@@ -101,8 +101,8 @@ func (l *ListComponent) View() string {
 
 type DropdownComponent struct {
 	Options       []string
-	Cursor        int
-	IsFocused     bool
+	Cursor         int
+	IsFocused      bool
 	Width, Height int
 }
 
@@ -213,9 +213,9 @@ func (r *RadioComponent) View() string {
 
 type MultiSelectComponent struct {
 	Options       []string
-	Cursor        int
+	Cursor         int
 	Selected      map[int]bool
-	IsFocused     bool
+	IsFocused      bool
 	Width, Height int
 }
 
@@ -287,12 +287,22 @@ func (t *textareaWrapper) Blur() { t.IsFocused = false; t.model.Blur() }
 // --- Configuration & Model ---
 
 type Config struct {
-	ID, Title, Direction, Cmd, Watches, Type, HistoryFile, Shortcut, Src string
-	WidthPC, HeightPC                                                    int
-	Items                                                                []Config
-	Actions                                                              []Action
-	Focusable                                                            *bool
-	Secure                                                               bool
+	ID          string            `yaml:"id"`
+	Actions     []Action          `yaml:"actions"`
+	Title       string            `yaml:"title"`
+	WidthPC     int               `yaml:"width_pc"`
+	HeightPC    int               `yaml:"height_pc"`
+	Direction   string            `yaml:"direction"`
+	Items       []Config          `yaml:"items"`
+	Type        string            `yaml:"type"`
+	Style       map[string]string `yaml:"style"`
+	Cmd         string            `yaml:"cmd"`
+	Watches     string            `yaml:"watches"`
+	HistoryFile string            `yaml:"history"`
+	Shortcut    string            `yaml:"shortcut"`
+	Src         string            `yaml:"src"`
+	Focusable   *bool
+	Secure      bool
 }
 
 type TopLevelConfig struct {
@@ -304,7 +314,6 @@ type node struct {
 	model     Component
 	conf      Config
 	lastValue string
-	x, y, w, h int
 }
 
 type view struct {
@@ -317,6 +326,7 @@ type ReloadMsg struct { Top TopLevelConfig }
 
 type model struct {
 	configPath    string
+	baseDir       string // New: Track the directory of the root config
 	topConf       TopLevelConfig
 	views         []*view
 	activeIdx     int
@@ -324,6 +334,28 @@ type model struct {
 	width, height int
 	state         map[string]string
 	tabWidths     []int
+}
+
+
+func (m *model) applyYAMLStyle(base lipgloss.Style, styleMap map[string]string) lipgloss.Style {
+	s := base
+	for key, val := range styleMap {
+		switch key {
+		case "fg", "foreground":
+			s = s.Foreground(lipgloss.Color(val))
+		case "bg", "background":
+			s = s.Background(lipgloss.Color(val))
+		case "bold":
+			if val == "true" { s = s.Bold(true) }
+		case "border":
+			switch val {
+			case "rounded": s = s.Border(lipgloss.RoundedBorder())
+			case "thick":   s = s.Border(lipgloss.ThickBorder())
+			case "normal":  s = s.Border(lipgloss.NormalBorder())
+			}
+		}
+	}
+	return s
 }
 
 func (m *model) resolve(template string) string {
@@ -400,7 +432,9 @@ func (m *model) buildViews(top TopLevelConfig) {
 		var flatten func(*Config)
 		flatten = func(c *Config) {
 			if c.Src != "" {
-				subFile, err := os.ReadFile(c.Src)
+				// Use filepath.Join to resolve paths relative to the baseDir
+				fullPath := filepath.Join(m.baseDir, c.Src)
+				subFile, err := os.ReadFile(fullPath)
 				if err == nil {
 					var sc Config; yaml.Unmarshal(subFile, &sc)
 					if c.ID == "" { c.ID = sc.ID }; if c.Title == "" { c.Title = sc.Title }; if c.Type == "" { c.Type = sc.Type }
@@ -408,8 +442,8 @@ func (m *model) buildViews(top TopLevelConfig) {
 					if c.Cmd == "" { c.Cmd = sc.Cmd }; if c.Watches == "" { c.Watches = sc.Watches }
 					if len(c.Actions) == 0 { c.Actions = sc.Actions }; if c.Focusable == nil { c.Focusable = sc.Focusable }
 					if c.HistoryFile == "" { c.HistoryFile = sc.HistoryFile }; c.Secure = sc.Secure || c.Secure
-					// MERGE PERCENTAGES
 					if c.WidthPC == 0 { c.WidthPC = sc.WidthPC }; if c.HeightPC == 0 { c.HeightPC = sc.HeightPC }
+					if c.Style == nil { c.Style = sc.Style }
 				}
 			}
 			if len(c.Items) == 0 {
@@ -423,7 +457,11 @@ func (m *model) buildViews(top TopLevelConfig) {
 				case "multi": comp = &MultiSelectComponent{}
 				default:
 					ta := textarea.New(); ta.Placeholder = "ID: " + c.ID; tw := &textareaWrapper{model: ta, IsSecure: c.Secure}
-					if c.HistoryFile != "" { content, _ := os.ReadFile(c.HistoryFile); if len(content) > 0 { tw.History = strings.Split(strings.TrimSpace(string(content)), "\n") } }
+					if c.HistoryFile != "" {
+						histPath := filepath.Join(m.baseDir, c.HistoryFile)
+						content, _ := os.ReadFile(histPath)
+						if len(content) > 0 { tw.History = strings.Split(strings.TrimSpace(string(content)), "\n") } 
+					}
 					comp = tw
 				}
 				nodes = append(nodes, &node{model: comp, conf: *c})
@@ -451,31 +489,6 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if vReload, ok := msg.(ReloadMsg); ok { m.buildViews(vReload.Top); return m, nil }
 	v := m.views[m.activeIdx]
 	switch msg := msg.(type) {
-	case tea.MouseMsg:
-		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
-			if msg.Y == 0 {
-				curX := 0; for i, width := range m.tabWidths {
-					if msg.X >= curX && msg.X < curX+width {
-						v.nodes[v.focusIdx].model.Blur(); m.activeIdx = i
-						return m, m.views[m.activeIdx].nodes[m.views[m.activeIdx].focusIdx].model.Focus()
-					}
-					curX += width
-				}
-			}
-			for i, n := range v.nodes {
-				if msg.X >= n.x && msg.X < n.x+n.w && msg.Y >= n.y && msg.Y < n.y+n.h {
-					if d, ok := n.model.(*DropdownComponent); ok && d.IsFocused {
-						startY := n.y + 1; if n.conf.Title != "" { startY++ }
-						clickIdx := msg.Y - startY
-						if clickIdx >= 0 && clickIdx < len(d.Options) { d.Cursor = clickIdx; return m, nil }
-					}
-					if n.model.Focusable() {
-						v.nodes[v.focusIdx].model.Blur(); v.focusIdx = i; focusCmd := n.model.Focus()
-						m.runCmd(n.conf.ID, tea.KeyMsg{Type: tea.KeyEnter}); return m, focusCmd
-					}
-				}
-			}
-		}
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c": return m, tea.Quit
@@ -522,60 +535,221 @@ func (m *model) View() string {
 		rendered := style.Render(label); m.tabWidths[i] = lipgloss.Width(rendered); tabs = append(tabs, rendered)
 	}
 	tabBar := lipgloss.JoinHorizontal(lipgloss.Top, tabs...); contentH := m.height - 2; if contentH < 0 { contentH = 0 }
-	content := m.renderRecursive(v.conf, m.width, contentH, 0, 1)
+	content := m.renderRecursive(v.conf, m.width, contentH)
 	statusStyle := lipgloss.NewStyle().Background(lipgloss.Color("235")).Foreground(lipgloss.Color("245")).Width(m.width)
 	statusText := fmt.Sprintf(" VIEW: %s | SIZE: %dx%d | Tab: Cycle | Esc: Back", v.conf.ID, m.width, m.height)
 	return tabBar + "\n" + content + "\n" + statusStyle.Render(statusText)
 }
 
-func (m *model) renderRecursive(conf Config, w, h, offX, offY int) string {
+func (m *model) renderRecursive(conf Config, w, h int) string {
 	v := m.views[m.activeIdx]
+
 	if len(conf.Items) == 0 {
-		var target *node; for _, n := range v.nodes { if n.conf.ID == conf.ID { target = n; break } }
-		if target == nil { return "ERR: " + conf.ID }; target.x, target.y, target.w, target.h = offX, offY, w, h
-		if !target.model.Focusable() { target.model.SetSize(w, h); return lipgloss.NewStyle().Width(w).Height(h).MaxHeight(h).MaxWidth(w).Align(lipgloss.Top, lipgloss.Left).Render(target.model.View()) }
-		hasTitle := conf.Title != ""; boxH := h; if hasTitle { boxH = h - 1 }; if boxH < 3 { boxH = 3 }
-		style := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("240")).Width(w - 2).Height(boxH - 2)
-		if v.nodes[v.focusIdx].conf.ID == conf.ID { style = style.Border(lipgloss.ThickBorder()).BorderForeground(lipgloss.Color("205")) }
-		target.model.SetSize(w-2, boxH-2); renderedBox := style.Render(target.model.View())
-		if !hasTitle { return lipgloss.NewStyle().Width(w).Height(h).MaxHeight(h).MaxWidth(w).Render(renderedBox) }
+		var target *node
+		for _, n := range v.nodes {
+			if n.conf.ID == conf.ID {
+				target = n
+				break
+			}
+		}
+
+		if target == nil {
+			return "ERR: " + conf.ID
+		}
+
+		rawView := target.model.View()
+		userStyle := m.applyYAMLStyle(lipgloss.NewStyle(), conf.Style)
+		styledContent := userStyle.Render(rawView)
+
+		if !target.model.Focusable() {
+			target.model.SetSize(w, h)
+			return lipgloss.NewStyle().
+				Width(w).
+				Height(h).
+				MaxHeight(h).
+				MaxWidth(w).
+				Align(lipgloss.Top, lipgloss.Left).
+				Render(styledContent)
+		}
+
+		hasTitle := conf.Title != ""
+		boxH := h
+		if hasTitle { boxH = h - 1 }
+		if boxH < 3 { boxH = 3 }
+
+		boxStyle := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("240")).
+			Width(w - 2).
+			Height(boxH - 2)
+
+		if v.nodes[v.focusIdx].conf.ID == conf.ID {
+			boxStyle = boxStyle.Border(lipgloss.ThickBorder()).
+				BorderForeground(lipgloss.Color("205"))
+		}
+
+		// subtract border height (top + bottom = 2) so the component doesn't
+		// "bleed" out of its box.
+		contentH := boxH - 2 
+		if contentH < 1 { contentH = 1 }
+
+		target.model.SetSize(w-2, contentH)
+		renderedBox := boxStyle.Render(styledContent)
+
+		if !hasTitle {
+			return lipgloss.NewStyle().Width(w).Height(h).MaxHeight(h).MaxWidth(w).Render(renderedBox)
+		}
+
 		title := lipgloss.NewStyle().Bold(true).MaxWidth(w).Render(conf.Title)
-		return lipgloss.NewStyle().Width(w).Height(h).MaxHeight(h).MaxWidth(w).Render(lipgloss.JoinVertical(lipgloss.Left, title, renderedBox))
+		return lipgloss.NewStyle().
+			Width(w).
+			Height(h).
+			MaxHeight(h).
+			MaxWidth(w).
+			Render(lipgloss.JoinVertical(lipgloss.Left, title, renderedBox))
 	}
-	var children []string; curX, curY := offX, offY; usableH := h; if conf.Direction != "horizontal" { usableH = h - (len(conf.Items) - 1); if usableH < 0 { usableH = 0 } }
+
+	// --- CONTAINER RENDERING ---
+	var children []string
+	usableH := h
+	if conf.Direction != "horizontal" && len(conf.Items) > 1 {
+		usableH = h - (len(conf.Items) - 1)
+		if usableH < 0 { usableH = 0 }
+	}
+
+	unspecifiedCount := 0
+	totalSpecifiedPC := 0
+	for _, child := range conf.Items {
+		pc := child.HeightPC
+		if conf.Direction == "horizontal" { pc = child.WidthPC }
+		if pc > 0 { totalSpecifiedPC += pc } else { unspecifiedCount++ }
+	}
+
+	autoPC := 0
+	if unspecifiedCount > 0 {
+		remainingPC := 100 - totalSpecifiedPC
+		if remainingPC < 0 { remainingPC = 0 }
+		autoPC = remainingPC / unspecifiedCount
+	}
+
 	remainingW, remainingH := w, usableH
 	for i, child := range conf.Items {
 		childW, childH := w, usableH
 		if conf.Direction == "horizontal" {
-			if i == len(conf.Items)-1 { childW = remainingW } else { childW = (w * child.WidthPC) / 100 }
-			children = append(children, m.renderRecursive(child, childW, h, curX, curY)); curX += childW; remainingW -= childW
+			if i == len(conf.Items)-1 {
+				childW = remainingW
+			} else {
+				pc := child.WidthPC
+				if pc == 0 { pc = autoPC }
+				childW = (w * pc) / 100
+			}
+			children = append(children, m.renderRecursive(child, childW, h))
+			remainingW -= childW
 		} else {
-			if i == len(conf.Items)-1 { childH = remainingH } else { childH = (usableH * child.HeightPC) / 100 }
-			children = append(children, m.renderRecursive(child, w, childH, curX, curY)); curY += childH + 1; remainingH -= childH
+			if i == len(conf.Items)-1 {
+				childH = remainingH
+			} else {
+				pc := child.HeightPC
+				if pc == 0 { pc = autoPC }
+				childH = (usableH * pc) / 100
+			}
+			children = append(children, m.renderRecursive(child, w, childH))
+			remainingH -= childH
 		}
 	}
-	if conf.Direction == "horizontal" { return lipgloss.JoinHorizontal(lipgloss.Top, children...) }
+
+	if conf.Direction == "horizontal" {
+		return lipgloss.JoinHorizontal(lipgloss.Top, children...)
+	}
 	return strings.Join(children, "\n")
 }
 
-func watchConfig(path string, p *tea.Program) {
-	var lastMod time.Time
+func watchConfig(m *model, p *tea.Program) {
+	var lastMaxMod time.Time
 	for {
-		time.Sleep(1 * time.Second); info, err := os.Stat(path); if err != nil { continue }
-		if lastMod.IsZero() { lastMod = info.ModTime(); continue }
-		if info.ModTime().After(lastMod) {
-			lastMod = info.ModTime(); file, _ := os.ReadFile(path); var top TopLevelConfig
-			if yaml.Unmarshal(file, &top) != nil { var root Config; if yaml.Unmarshal(file, &root) == nil { top.Views = []Config{root} } }
-			if len(top.Views) > 0 { p.Send(ReloadMsg{Top: top}) }
+		time.Sleep(500 * time.Millisecond) // Faster heart-beat for better DX
+		
+		var currentMaxMod time.Time
+		// Scan the entire base directory for changes in YAML files
+		err := filepath.Walk(m.baseDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil { return err }
+			// Only care about .yaml or .yml files
+			if !info.IsDir() && (strings.HasSuffix(path, ".yaml") || strings.HasSuffix(path, ".yml")) {
+				if info.ModTime().After(currentMaxMod) {
+					currentMaxMod = info.ModTime()
+				}
+			}
+			return nil
+		})
+
+		if err != nil { continue }
+
+		if lastMaxMod.IsZero() {
+			lastMaxMod = currentMaxMod
+			continue
+		}
+
+		// If ANY file in the directory tree is newer than our last check, reload!
+		if currentMaxMod.After(lastMaxMod) {
+			lastMaxMod = currentMaxMod
+			
+			// Re-read the ROOT file
+			file, err := os.ReadFile(m.configPath)
+			if err != nil { continue }
+			
+			var top TopLevelConfig
+			if yaml.Unmarshal(file, &top) != nil {
+				var root Config
+				if yaml.Unmarshal(file, &root) == nil {
+					top.Views = []Config{root}
+				}
+			}
+			
+			if len(top.Views) > 0 {
+				p.Send(ReloadMsg{Top: top})
+			}
 		}
 	}
 }
 
 func main() {
-	configPath := flag.String("config", "", "Path to YAML"); flag.Parse(); if *configPath == "" { fmt.Println("Usage: -config <path>"); os.Exit(1) }
-	file, _ := os.ReadFile(*configPath); var top TopLevelConfig; err := yaml.Unmarshal(file, &top)
-	if err != nil || len(top.Views) == 0 { var root Config; yaml.Unmarshal(file, &root); top.Views = []Config{root} }
-	m := &model{configPath: *configPath, topConf: top, state: make(map[string]string)}; m.state["cwd"], _ = os.Getwd(); m.buildViews(top)
-	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()); go watchConfig(*configPath, p)
-	if _, err := p.Run(); err != nil { fmt.Println(err); os.Exit(1) }
+	configPath := flag.String("config", "", "Path to YAML")
+	flag.Parse()
+
+	if *configPath == "" {
+		fmt.Println("Usage: -config <path>")
+		os.Exit(1)
+	}
+
+	file, _ := os.ReadFile(*configPath)
+	var top TopLevelConfig
+	err := yaml.Unmarshal(file, &top)
+
+	if err != nil || len(top.Views) == 0 {
+		var root Config
+		yaml.Unmarshal(file, &root)
+		top.Views = []Config{root}
+	}
+
+	// Correctly resolve the base directory of the config file
+	absConfigPath, _ := filepath.Abs(*configPath)
+	baseDir := filepath.Dir(absConfigPath)
+
+	m := &model{
+		configPath: *configPath,
+		baseDir:    baseDir,
+		topConf:    top,
+		state:      make(map[string]string),
+	}
+
+	m.state["cwd"], _ = os.Getwd()
+	m.buildViews(top)
+
+	p := tea.NewProgram(m, tea.WithAltScreen())
+	go watchConfig(m, p)
+
+	if _, err := p.Run()
+	err != nil {
+		fmt.Println(err); os.Exit(1)
+	}
 }
