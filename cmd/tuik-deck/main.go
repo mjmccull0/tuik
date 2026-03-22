@@ -28,6 +28,7 @@ type Component interface {
 	Focusable() bool
 	Focus() tea.Cmd
 	Blur()
+	Click(row int)
 }
 
 type StaticComponent struct {
@@ -44,6 +45,7 @@ func (s *StaticComponent) SetValue(v string)          { s.Content = v }
 func (s *StaticComponent) Focusable() bool           { return s.IsFocusable }
 func (s *StaticComponent) Focus() tea.Cmd             { return nil }
 func (s *StaticComponent) Blur()                      {}
+func (s *StaticComponent) Click(row int) {}
 
 type Action struct {
 	Pattern    string `yaml:"pattern"`
@@ -77,6 +79,7 @@ func (l *ListComponent) SetValue(v string) {
 func (l *ListComponent) SetSize(w, h int) { l.Width = w; l.Height = h }
 func (l *ListComponent) Update(msg tea.Msg) (Component, tea.Cmd) {
 	if !l.IsFocused { return l, nil }
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -86,6 +89,7 @@ func (l *ListComponent) Update(msg tea.Msg) (Component, tea.Cmd) {
 	}
 	return l, nil
 }
+
 func (l *ListComponent) View() string {
 	if l.Height <= 0 { return "" }
 	var s strings.Builder
@@ -97,6 +101,11 @@ func (l *ListComponent) View() string {
 		if i-start >= l.Height-2 { break }
 	}
 	return strings.TrimSuffix(s.String(), "\n")
+}
+func (l *ListComponent) Click(row int) {
+	if row >= 0 && row < len(l.Items) {
+		l.Cursor = row
+	}
 }
 
 type DropdownComponent struct {
@@ -145,6 +154,11 @@ func (d *DropdownComponent) View() string {
 	}
 	return strings.TrimSuffix(s.String(), "\n")
 }
+func (d *DropdownComponent) Click(row int) {
+	if row >= 0 && row < len(d.Options) {
+		d.Cursor = row
+	}
+}
 
 type ToggleComponent struct {
 	Label     string
@@ -171,6 +185,9 @@ func (t *ToggleComponent) View() string {
 	box := "[ ]"; if t.On { box = "[X]" }; style := lipgloss.NewStyle()
 	if t.IsFocused { style = style.Foreground(lipgloss.Color("205")) }
 	return style.Render(box + " " + t.Label)
+}
+func (t *ToggleComponent) Click(row int) {
+	t.On = !t.On
 }
 
 type RadioComponent struct {
@@ -201,6 +218,13 @@ func (r *RadioComponent) Update(msg tea.Msg) (Component, tea.Cmd) {
 	}
 	return r, nil
 }
+func (r *RadioComponent) Click(row int) {
+    if row >= 0 && row < len(r.Options) {
+        r.Cursor = row
+        r.Selected = row
+    }
+}
+
 func (r *RadioComponent) View() string {
 	var s strings.Builder
 	for i, opt := range r.Options {
@@ -253,6 +277,11 @@ func (m *MultiSelectComponent) View() string {
 	}
 	return strings.TrimSuffix(s.String(), "\n")
 }
+func (m *MultiSelectComponent) Click(row int) {
+	if row >= 0 && row < len(m.Options) {
+		m.Selected[row] = !m.Selected[row]
+	}
+}
 
 type textareaWrapper struct {
 	model      textarea.Model
@@ -283,6 +312,11 @@ func (t *textareaWrapper) SetValue(v string)      { t.model.SetValue(v) }
 func (t *textareaWrapper) Focusable() bool        { return true }
 func (t *textareaWrapper) Focus() tea.Cmd { t.IsFocused = true; return t.model.Focus() }
 func (t *textareaWrapper) Blur() { t.IsFocused = false; t.model.Blur() }
+func (i *textareaWrapper) Click(row int) {
+    // Clicking an input doesn't change the value, 
+    // it just ensures the cursor is active.
+    i.Focus() 
+}
 
 // --- Configuration & Model ---
 
@@ -493,24 +527,36 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	v := m.views[m.activeIdx]
 	
 	switch msg := msg.(type) {
-	case tea.MouseMsg:
-		// We only care about the initial click (MouseLeft)
-		if msg.Type == tea.MouseLeft {
-			for i, n := range v.nodes {
-				// Hit detection: Is the click inside the component's last known position?
-				if msg.X >= n.rect.x && msg.X < n.rect.x+n.rect.w &&
-				   msg.Y >= n.rect.y && msg.Y < n.rect.y+n.rect.h {
-					
-					// If it's a new focusable component, swap them
-					if n.model.Focusable() && i != v.focusIdx {
-						v.nodes[v.focusIdx].model.Blur()
-						v.focusIdx = i
-						return m, v.nodes[v.focusIdx].model.Focus()
-					}
-					break // Found the clicked element, no need to check others
-				}
-			}
-		}
+  case tea.MouseMsg:
+    if msg.Type == tea.MouseLeft {
+        for i, n := range v.nodes {
+            if msg.X >= n.rect.x && msg.X < n.rect.x+n.rect.w &&
+               msg.Y >= n.rect.y && msg.Y < n.rect.y+n.rect.h {
+
+                // 1. Focus the element
+                if n.model.Focusable() && i != v.focusIdx {
+                    v.nodes[v.focusIdx].model.Blur()
+                    v.focusIdx = i
+                    v.nodes[v.focusIdx].model.Focus()
+                }
+
+                // 2. Calculate the local row
+                // We subtract 1 if there is a Title/Border offset
+                localY := msg.Y - n.rect.y
+                if n.conf.Title != "" { localY-- } // Offset for title line
+                localY-- // Offset for top border
+
+                // 3. Trigger the component's internal selection logic
+                n.model.Click(localY)
+
+                // 4. If it's a button, treat a click as an 'Enter' key
+                if n.conf.Type == "button" {
+                    return m, n.model.Focus() // Or trigger your cmd logic
+                }
+                return m, nil
+            }
+        }
+    }
 
 	case tea.KeyMsg:
 		switch msg.String() {
